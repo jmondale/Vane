@@ -37,6 +37,10 @@ struct ContentView: View {
         .task { await store.restoreSelectedPlace() }
         .task(id: store.query) { await store.updateSuggestions() }
         .onChange(of: store.suggestions) { _, _ in highlightedSuggestion = nil }
+        .onOpenURL { url in
+            guard let id = PlaceLink.placeID(from: url) else { return }
+            Task { await store.selectPlace(id: id) }
+        }
     }
 
     // MARK: - Search
@@ -164,13 +168,9 @@ struct ContentView: View {
     private var conditionBackground: some View {
         let condition = store.report?.current.condition ?? .clear
         let isDaytime = store.report?.current.isDaytime ?? true
-        return LinearGradient(
-            colors: condition.accentColors(isDaytime: isDaytime).map { $0.opacity(0.3) },
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .background(.background)
-        .ignoresSafeArea()
+        return condition.gradient(isDaytime: isDaytime, opacity: 0.3)
+            .background(.background)
+            .ignoresSafeArea()
     }
 }
 
@@ -376,31 +376,6 @@ private struct MessageView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Presentation
-
-private extension WeatherCondition {
-    /// A pair of tints used for the window background, keyed to the condition
-    /// and time of day. Kept low-opacity so text stays legible in both appearances.
-    func accentColors(isDaytime: Bool) -> [Color] {
-        guard isDaytime else { return [.indigo, .purple] }
-
-        switch self {
-        case .clear, .mainlyClear:
-            return [.blue, .cyan]
-        case .partlyCloudy:
-            return [.teal, .blue]
-        case .overcast, .fog, .unknown:
-            return [.gray, .teal]
-        case .drizzle, .rain, .showers, .freezingDrizzle, .freezingRain:
-            return [.blue, .indigo]
-        case .snow, .snowGrains, .snowShowers:
-            return [.cyan, .mint]
-        case .thunderstorm, .thunderstormWithHail:
-            return [.purple, .indigo]
-        }
     }
 }
 

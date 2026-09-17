@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Vane app icon — foreground layer 2 (front): the vane arrow.
+
+  One unified silhouette — arrowhead, shaft, and tail fin traced as a single
+  closed path — so no seam or stray rounded cap can show where the parts
+  meet. Drawn along a horizontal axis and rotated -45° to point north-east.
+
+  Proportions along the 675-unit axis: arrowhead 205, shaft 350, tail 120,
+  with a 76-unit shaft. Sized to carry the icon on its own at 32px, where the
+  cross behind it reduces to a faint backdrop.
+
+  The tail is a solid flag rather than a swallowtail. Earlier passes forked
+  it; at icon sizes any notch deep enough to read left the prongs as thin
+  slivers that looked like a bird's foot. Head and tail are matched by area
+  (~23,400 and ~25,700 units²) so neither end dominates.
+
+  The path is stroked with its own fill colour and a round line join purely
+  to round the corners, which expands it by 10 units on all sides. The HIG
+  warns that sharp points lose crispness at small icon sizes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+    <g transform="rotate(-45 512 512)">
+        <path
+            d="M 885,512
+               L 680,398 L 680,474
+               L 330,474 L 210,336 L 210,688 L 330,550
+               L 680,550 L 680,626
+               Z"
+            fill="#FFFFFF"
+            stroke="#FFFFFF"
+            stroke-width="20"
+            stroke-linejoin="round"/>
+    </g>
+</svg>

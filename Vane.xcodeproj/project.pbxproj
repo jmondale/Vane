@@ -39,6 +39,7 @@
 		E402AB5E30589E9800EFAD21 /* WeatherWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WeatherWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E402AB6030589E9800EFAD21 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = /System/Library/Frameworks/WidgetKit.framework; sourceTree = "<absolute>"; };
 		E402AB6230589E9800EFAD21 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = /System/Library/Frameworks/SwiftUI.framework; sourceTree = "<absolute>"; };
+		E402AC0B3058EF7000EFAD21 /* WeatherWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WeatherWidgetExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -52,10 +53,20 @@
 		E402AB7B3058A3DE00EFAD21 /* Exceptions for "Vane" folder in "WeatherWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ConditionStyle.swift,
+				PlaceLink.swift,
+				SharedStore.swift,
 				WeatherModels.swift,
 				WeatherService.swift,
 			);
 			target = E402AB5D30589E9800EFAD21 /* WeatherWidgetExtension */;
+		};
+		E402AC113058F04100EFAD21 /* Exceptions for "Vane" folder in "Vane" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 000000000000000100000000 /* Vane */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -63,6 +74,7 @@
 		000000000000000000000010 /* Vane */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				E402AC113058F04100EFAD21 /* Exceptions for "Vane" folder in "Vane" target */,
 				E402AB7B3058A3DE00EFAD21 /* Exceptions for "Vane" folder in "WeatherWidgetExtension" target */,
 			);
 			path = Vane;
@@ -97,6 +109,7 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				E402AC0B3058EF7000EFAD21 /* WeatherWidgetExtension.entitlements */,
 				000000000000000000000010 /* Vane */,
 				E402AB6430589E9800EFAD21 /* WeatherWidget */,
 				E402AB5F30589E9800EFAD21 /* Frameworks */,
@@ -373,6 +386,9 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Vane" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Vane/Vane.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K4RQKPMFWC;
@@ -381,6 +397,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Vane/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Vane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -396,7 +413,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = devplaceholder.MV9ZC2ZA.MyApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jayemondale.Vane;
 				PRODUCT_NAME = Vane;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -414,6 +431,9 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "Vane" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Vane/Vane.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K4RQKPMFWC;
@@ -422,6 +442,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Vane/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Vane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -437,7 +458,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = devplaceholder.MV9ZC2ZA.MyApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jayemondale.Vane;
 				PRODUCT_NAME = Vane;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -457,8 +478,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WeatherWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K4RQKPMFWC;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -478,8 +501,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = devplaceholder.MV9ZC2ZA.MyApp.WeatherWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jayemondale.Vane.WeatherWidgetExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -498,8 +522,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WeatherWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K4RQKPMFWC;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -519,8 +545,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = devplaceholder.MV9ZC2ZA.MyApp.WeatherWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jayemondale.Vane.WeatherWidgetExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

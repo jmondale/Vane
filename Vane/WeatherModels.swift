@@ -49,7 +49,10 @@ nonisolated enum UnitPreference: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// A weather condition, mapped from the WMO code that Open-Meteo reports.
-nonisolated enum WeatherCondition: Hashable, Sendable {
+///
+/// The raw values are persisted in the widget's report cache, so treat them as
+/// a storage contract: add cases freely, but don't rename an existing one.
+nonisolated enum WeatherCondition: String, Codable, Hashable, Sendable {
     case clear
     case mainlyClear
     case partlyCloudy
@@ -133,7 +136,7 @@ nonisolated enum WeatherCondition: Hashable, Sendable {
 }
 
 /// Conditions at the location right now.
-nonisolated struct CurrentWeather: Sendable {
+nonisolated struct CurrentWeather: Codable, Sendable {
     let temperatureCelsius: Double
     let apparentTemperatureCelsius: Double
     let relativeHumidity: Int
@@ -143,8 +146,10 @@ nonisolated struct CurrentWeather: Sendable {
 }
 
 /// A single day in the forecast. `weekday` and `isToday` are resolved in the
-/// location's own time zone, not the viewer's.
-nonisolated struct DailyForecast: Identifiable, Sendable {
+/// location's own time zone, not the viewer's, and are fixed at fetch time —
+/// a cached report served the next morning will still say "Today" for
+/// yesterday, which is why stale renders are labelled with their fetch time.
+nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     let date: Date
     let weekday: String
     let isToday: Bool
@@ -156,26 +161,12 @@ nonisolated struct DailyForecast: Identifiable, Sendable {
 }
 
 /// Everything one fetch produces for a place.
-nonisolated struct WeatherReport: Sendable {
+nonisolated struct WeatherReport: Codable, Sendable {
     let current: CurrentWeather
     let daily: [DailyForecast]
 }
 
 extension Double {
-    /// Formats a Celsius value using whichever unit the viewer's locale uses
-    /// for weather. Used where no explicit preference is available — the widget
-    /// can't read the app's setting, since that would need an App Group.
-    var localeTemperatureText: String {
-        Measurement(value: self, unit: UnitTemperature.celsius)
-            .formatted(
-                .measurement(
-                    width: .narrow,
-                    usage: .weather,
-                    numberFormatStyle: .number.precision(.fractionLength(0))
-                )
-            )
-    }
-
     /// Formats a Celsius value as whole degrees in the preferred unit.
     func temperatureText(in preference: UnitPreference) -> String {
         Measurement(value: self, unit: UnitTemperature.celsius)

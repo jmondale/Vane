@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Vane app icon — foreground layer 1 (back): the cardinal cross.
+
+  The armature a weather vane turns on. Held axis-aligned while the arrow in
+  layer 2 sits on the diagonal, so the two never run parallel and the icon
+  reads as an instrument rather than a share arrow.
+
+  Bars are 90 units thick, centred on 512 (so x/y = 467), arms 564 long, with
+  corner radius held at 0.3x thickness. 90 was picked by compiling the real
+  icon at 64/90/120/150 and comparing: it's the last thickness that gains
+  presence at 32px without the 128px rendering going heavy. Past ~120 the bars
+  exceed the arrow's own 76-unit shaft and the hierarchy inverts — the icon
+  starts reading as a plus sign with an arrow on it.
+
+  Arms stop well inside the arrow's span and are only lightly rounded: they
+  read as structure rather than as a plus sign, and they don't crowd the
+  edges, which turned the 32px rendering to mud in an earlier pass.
+
+  Set this layer's opacity in Icon Composer (40%); it's exported fully opaque
+  so transparency can be previewed against the system's own effects.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+    <g fill="#FFFFFF">
+        <rect x="467" y="230" width="90" height="564" rx="27"/>
+        <rect x="230" y="467" width="564" height="90" rx="27"/>
+    </g>
+</svg>

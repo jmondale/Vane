@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WidgetKit
 
 /// Owns the app's weather state: the selected place, its latest report, and
 /// the unit preference. The selected place and units persist between launches.
@@ -11,11 +12,6 @@ import Observation
         case failed(message: String)
     }
 
-    private enum DefaultsKey {
-        static let place = "selectedPlace"
-        static let units = "unitPreference"
-    }
-
     /// Below this length a query matches too much of the world to be useful.
     private static let minimumSuggestionLength = 2
 
@@ -24,8 +20,9 @@ import Observation
 
     var query: String = ""
 
-    /// Written through to `UserDefaults` on every change, so the manual
+    /// Written through to the shared defaults on every change, so the manual
     /// observation accessors are used instead of a tracked stored property.
+    /// The widget reads the same value, so a change has to reload its timelines.
     var unitPreference: UnitPreference {
         get {
             access(keyPath: \.unitPreference)
@@ -34,7 +31,8 @@ import Observation
         set {
             withMutation(keyPath: \.unitPreference) {
                 storedUnitPreference = newValue
-                defaults.set(newValue.rawValue, forKey: DefaultsKey.units)
+                shared.unitPreference = newValue
+                WidgetCenter.shared.reloadAllTimelines()
             }
         }
     }
@@ -54,12 +52,11 @@ import Observation
     private var committedQuery: String?
 
     private let service = WeatherService()
-    private let defaults: UserDefaults
+    private let shared: SharedStore
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        let storedUnits = defaults.string(forKey: DefaultsKey.units)
-        self.storedUnitPreference = storedUnits.flatMap(UnitPreference.init(rawValue:)) ?? .metric
+    init(shared: SharedStore = SharedStore()) {
+        self.shared = shared
+        self.storedUnitPreference = shared.unitPreference
     }
 
     var isLoading: Bool { status == .loading }
@@ -71,12 +68,16 @@ import Observation
 
     /// Reloads the place chosen in a previous launch, if there was one.
     func restoreSelectedPlace() async {
-        guard place == nil,
-              let data = defaults.data(forKey: DefaultsKey.place),
-              let saved = try? JSONDecoder().decode(Place.self, from: data)
-        else { return }
-
+        guard place == nil, let saved = shared.selectedPlace else { return }
         await select(saved)
+    }
+
+    /// Selects the place a widget's deep link points at. The id resolves
+    /// against the shared directory, which holds every place the app or a
+    /// widget has looked up, so no geocoding round trip is needed.
+    func selectPlace(id: Place.ID) async {
+        guard place?.id != id, let match = shared.places(for: [id]).first else { return }
+        await select(match)
     }
 
     /// Refreshes the completion list for the current query.
@@ -147,11 +148,16 @@ import Observation
         committedQuery = place.name
 
         do {
-            report = try await service.report(for: place)
+            let fetched = try await service.report(for: place)
+            report = fetched
             status = .ready
-            if let data = try? JSONEncoder().encode(place) {
-                defaults.set(data, forKey: DefaultsKey.place)
-            }
+
+            // The widget reads both of these: the selection, so a newly added
+            // widget starts on this city, and the cache, so it can render
+            // immediately instead of waiting on its own first fetch.
+            shared.selectedPlace = place
+            shared.cache(fetched, for: place)
+            WidgetCenter.shared.reloadAllTimelines()
         } catch is CancellationError {
             status = report == nil ? .idle : .ready
         } catch {
