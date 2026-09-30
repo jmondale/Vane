@@ -46,6 +46,13 @@ nonisolated enum UnitPreference: String, CaseIterable, Identifiable, Sendable {
         case .imperial: .milesPerHour
         }
     }
+
+    var precipitationUnit: UnitLength {
+        switch self {
+        case .metric: .millimeters
+        case .imperial: .inches
+        }
+    }
 }
 
 /// A weather condition, mapped from the WMO code that Open-Meteo reports.
@@ -149,7 +156,15 @@ nonisolated struct CurrentWeather: Codable, Sendable {
 /// location's own time zone, not the viewer's, and are fixed at fetch time —
 /// a cached report served the next morning will still say "Today" for
 /// yesterday, which is why stale renders are labelled with their fetch time.
+///
+/// This type is persisted in the widget's report cache. Adding a property is
+/// safe but not free: reports cached before the property existed can no longer
+/// be decoded, and `SharedStore.cachedReport(for:)` drops them. The widget
+/// loses its stale-data fallback once and refetches.
 nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
+    /// Below this, a chance isn't worth the visual noise in a seven-day row.
+    private static let chanceDisplayThreshold = 10
+
     let date: Date
     let weekday: String
     let isToday: Bool
@@ -157,13 +172,34 @@ nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     let highCelsius: Double
     let lowCelsius: Double
 
+    /// Chance of measurable precipitation, 0–100. Open-Meteo reports no single
+    /// daily figure, so this is the day's maximum hourly probability.
+    let precipitationProbability: Int
+
+    /// Total expected precipitation, as liquid water equivalent — snow is
+    /// included here rather than reported separately.
+    let precipitationMillimeters: Double
+
     var id: Date { date }
+
+    /// The chance of precipitation, or `nil` when it's low enough to omit.
+    var precipitationChanceText: String? {
+        guard precipitationProbability >= Self.chanceDisplayThreshold else { return nil }
+        return precipitationProbability.formatted(.percent)
+    }
 }
 
 /// Everything one fetch produces for a place.
 nonisolated struct WeatherReport: Codable, Sendable {
     let current: CurrentWeather
     let daily: [DailyForecast]
+
+    /// Today's entry, falling back to the first day available. A report cached
+    /// overnight has no day flagged as today, and its first entry is the
+    /// closest thing to one.
+    var today: DailyForecast? {
+        daily.first { $0.isToday } ?? daily.first
+    }
 }
 
 extension Double {
@@ -176,6 +212,25 @@ extension Double {
                     width: .abbreviated,
                     usage: .asProvided,
                     numberFormatStyle: .number.precision(.fractionLength(0))
+                )
+            )
+    }
+
+    /// Formats a millimetre value in the preferred unit.
+    ///
+    /// At most two fraction digits, and no trailing zeroes. That reads well in
+    /// both units across the whole range — 0.2 mm and 18 mm, 0.01 in and
+    /// 0.71 in. Significant digits instead would render a light shower as
+    /// "0.0079 in", which is four digits of precision the forecast doesn't
+    /// have.
+    func precipitationText(in preference: UnitPreference) -> String {
+        Measurement(value: self, unit: UnitLength.millimeters)
+            .converted(to: preference.precipitationUnit)
+            .formatted(
+                .measurement(
+                    width: .abbreviated,
+                    usage: .asProvided,
+                    numberFormatStyle: .number.precision(.fractionLength(0...2))
                 )
             )
     }

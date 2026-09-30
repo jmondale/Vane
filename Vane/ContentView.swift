@@ -139,6 +139,7 @@ struct ContentView: View {
                     CurrentConditionsCard(
                         place: place,
                         current: report.current,
+                        today: report.today,
                         units: store.unitPreference
                     )
                     ForecastCard(days: report.daily, units: store.unitPreference)
@@ -240,6 +241,12 @@ private struct SuggestionRow: View {
 private struct CurrentConditionsCard: View {
     let place: Place
     let current: CurrentWeather
+
+    /// Today's forecast, for the precipitation total. Open-Meteo's *current*
+    /// precipitation is only the last hour, which reads as 0 most of the time
+    /// and says nothing useful about the day ahead.
+    let today: DailyForecast?
+
     let units: UnitPreference
 
     var body: some View {
@@ -267,9 +274,24 @@ private struct CurrentConditionsCard: View {
                     Text(current.condition.description)
                         .font(.headline)
                         .foregroundStyle(.secondary)
+
+                    // The day's full range, in the same "H:… L:…" shorthand the
+                    // widget uses, so both surfaces read the same way.
+                    if let today {
+                        HStack(spacing: 8) {
+                            Text("H:\(today.highCelsius.temperatureText(in: units))")
+                            Text("L:\(today.lowCelsius.temperatureText(in: units))")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .contentTransition(.numericText())
+                        .padding(.top, 2)
+                    }
                 }
             }
             .accessibilityElement(children: .combine)
+            // Spelled out, because "H:" and "L:" are read aloud as letters.
+            .accessibilityLabel(temperatureAccessibilityLabel)
 
             HStack(spacing: 12) {
                 DetailTile(
@@ -287,11 +309,26 @@ private struct CurrentConditionsCard: View {
                     label: "Wind",
                     value: current.windSpeedKPH.windSpeedText(in: units)
                 )
+                DetailTile(
+                    symbol: "drop.fill",
+                    label: "Rain",
+                    value: today?.precipitationMillimeters.precipitationText(in: units) ?? "—"
+                )
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(in: .rect(cornerRadius: 20))
+    }
+
+    private var temperatureAccessibilityLabel: String {
+        var label = current.temperatureCelsius.temperatureText(in: units)
+        label += ", \(current.condition.description)"
+        if let today {
+            label += ", high \(today.highCelsius.temperatureText(in: units))"
+            label += ", low \(today.lowCelsius.temperatureText(in: units))"
+        }
+        return label
     }
 }
 
@@ -328,12 +365,18 @@ private struct ForecastCard: View {
                     Image(systemName: day.condition.symbolName(isDaytime: true))
                         .font(.title3)
                         .symbolRenderingMode(.multicolor)
+                        // These symbols differ in intrinsic height — cloud.fill
+                        // is much shorter than cloud.sun.fill — so without a
+                        // fixed height every row below sits at a different
+                        // level from one column to the next.
+                        .frame(height: 24)
                         .accessibilityHidden(true)
                     Text(day.highCelsius.temperatureText(in: units))
                         .font(.callout.weight(.medium))
                     Text(day.lowCelsius.temperatureText(in: units))
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                    precipitationChance(for: day)
                 }
                 .frame(maxWidth: .infinity)
                 .accessibilityElement(children: .combine)
@@ -346,11 +389,36 @@ private struct ForecastCard: View {
         .glassEffect(in: .rect(cornerRadius: 20))
     }
 
+    /// The droplet and percentage for a wet day. The row is reserved even when
+    /// there's no chance worth showing, so a mix of wet and dry days doesn't
+    /// leave the columns at different heights.
+    @ViewBuilder private func precipitationChance(for day: DailyForecast) -> some View {
+        HStack(spacing: 2) {
+            if let chance = day.precipitationChanceText {
+                Image(systemName: "drop.fill")
+                    .font(.system(size: 8))
+                Text(chance)
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+        }
+        .foregroundStyle(.secondary)
+        .frame(height: 12)
+    }
+
     private func accessibilityLabel(for day: DailyForecast) -> String {
         let name = day.isToday ? "Today" : day.weekday
         let high = day.highCelsius.temperatureText(in: units)
         let low = day.lowCelsius.temperatureText(in: units)
-        return "\(name), \(day.condition.description), high \(high), low \(low)"
+        var label = "\(name), \(day.condition.description), high \(high), low \(low)"
+
+        // Spoken in full, unlike the abbreviated column, and only when there's
+        // something to report.
+        if let chance = day.precipitationChanceText {
+            let amount = day.precipitationMillimeters.precipitationText(in: units)
+            label += ", \(chance) chance of precipitation, \(amount) expected"
+        }
+        return label
     }
 }
 
@@ -381,4 +449,91 @@ private struct MessageView: View {
 
 #Preview {
     ContentView()
+}
+
+// MARK: - Card previews
+//
+// The live `ContentView` preview above restores a saved place and fetches, so a
+// snapshot of it almost always catches the loading spinner. These render the
+// cards from fixed data instead, at the window's 480pt minimum width, which is
+// the tight case for the detail tile row.
+
+private extension Place {
+    static let preview = Place(
+        id: 5_780_026,
+        name: "Cedar Hills",
+        latitude: 40.4119,
+        longitude: -111.7527,
+        country: "United States",
+        admin1: "Utah"
+    )
+}
+
+private extension CurrentWeather {
+    static let preview = CurrentWeather(
+        temperatureCelsius: 18,
+        apparentTemperatureCelsius: 17,
+        relativeHumidity: 46,
+        windSpeedKPH: 11,
+        condition: .partlyCloudy,
+        isDaytime: true
+    )
+}
+
+private extension DailyForecast {
+    /// A wet day, so the precipitation chance is above the display threshold.
+    static let preview = DailyForecast(
+        date: Date(timeIntervalSince1970: 1_789_000_000),
+        weekday: "Tue",
+        isToday: true,
+        condition: .partlyCloudy,
+        highCelsius: 24,
+        lowCelsius: 11,
+        precipitationProbability: 50,
+        precipitationMillimeters: 1.4
+    )
+
+    /// Seven days mixing wet and dry, to check that the reserved chance row
+    /// keeps the columns aligned.
+    static let previewWeek: [DailyForecast] = {
+        let start = Date(timeIntervalSince1970: 1_789_000_000)
+        let days: [(WeatherCondition, Double, Double, Int, Double)] = [
+            (.partlyCloudy, 24, 11, 50, 1.4),
+            (.mainlyClear, 26, 12, 8, 0),
+            (.clear, 27, 13, 0, 0),
+            (.rain, 19, 11, 80, 6.4),
+            (.showers, 18, 10, 65, 3.1),
+            (.overcast, 21, 12, 26, 0),
+            (.clear, 23, 13, 3, 0)
+        ]
+        let weekdayStyle = Date.FormatStyle().weekday(.abbreviated)
+        return days.enumerated().map { index, day in
+            let date = start.addingTimeInterval(Double(index) * 86_400)
+            return DailyForecast(
+                date: date,
+                weekday: date.formatted(weekdayStyle),
+                isToday: index == 0,
+                condition: day.0,
+                highCelsius: day.1,
+                lowCelsius: day.2,
+                precipitationProbability: day.3,
+                precipitationMillimeters: day.4
+            )
+        }
+    }()
+}
+
+#Preview("Cards", traits: .sizeThatFitsLayout) {
+    VStack(spacing: 16) {
+        CurrentConditionsCard(
+            place: .preview,
+            current: .preview,
+            today: .preview,
+            units: .metric
+        )
+        ForecastCard(days: DailyForecast.previewWeek, units: .metric)
+    }
+    .padding(20)
+    .frame(width: 480)
+    .background(WeatherCondition.partlyCloudy.gradient(isDaytime: true, opacity: 0.3))
 }

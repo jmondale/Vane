@@ -58,7 +58,7 @@ nonisolated struct WeatherService: Sendable {
                 ),
                 URLQueryItem(
                     name: "daily",
-                    value: "weather_code,temperature_2m_max,temperature_2m_min"
+                    value: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum"
                 ),
                 URLQueryItem(name: "timezone", value: "auto"),
                 URLQueryItem(name: "forecast_days", value: String(forecastDays))
@@ -132,9 +132,22 @@ nonisolated struct WeatherService: Sendable {
                 isToday: calendar.isDateInToday(date),
                 condition: WeatherCondition(wmoCode: daily.weatherCode[index]),
                 highCelsius: daily.temperatureMax[index],
-                lowCelsius: daily.temperatureMin[index]
+                lowCelsius: daily.temperatureMin[index],
+                precipitationProbability: value(daily.precipitationProbabilityMax, at: index, default: 0),
+                precipitationMillimeters: value(daily.precipitationSum, at: index, default: 0)
             )
         }
+    }
+
+    /// Reads one element of an optional array of optionals, falling back when
+    /// the key was absent, the array is shorter than the forecast, or the entry
+    /// itself is null. A missing precipitation value means "none reported", so
+    /// it must not drop the whole day from the forecast.
+    private static func value<T>(_ array: [T?]?, at index: Int, default fallback: T) -> T {
+        guard let array, array.indices.contains(index), let value = array[index] else {
+            return fallback
+        }
+        return value
     }
 }
 
@@ -173,11 +186,19 @@ private nonisolated struct ForecastResponse: Decodable {
         let temperatureMax: [Double]
         let temperatureMin: [Double]
 
+        /// Doubly optional on purpose. Open-Meteo omits these keys entirely if
+        /// the model doesn't supply them, and returns `null` entries past the
+        /// probability horizon, which is shorter than the forecast itself.
+        let precipitationProbabilityMax: [Int?]?
+        let precipitationSum: [Double?]?
+
         enum CodingKeys: String, CodingKey {
             case time
             case weatherCode = "weather_code"
             case temperatureMax = "temperature_2m_max"
             case temperatureMin = "temperature_2m_min"
+            case precipitationProbabilityMax = "precipitation_probability_max"
+            case precipitationSum = "precipitation_sum"
         }
     }
 }

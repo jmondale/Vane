@@ -509,14 +509,23 @@ extension WidgetSnapshot {
     /// round trip isn't appropriate.
     static let placeholder: WidgetSnapshot = {
         let start = Date(timeIntervalSince1970: 1_789_000_000)
-        let conditions: [(WeatherCondition, Double, Double)] = [
-            (.mainlyClear, 24, 13),
-            (.partlyCloudy, 23, 12),
-            (.overcast, 21, 12),
-            (.rain, 19, 11),
-            (.showers, 18, 11),
-            (.partlyCloudy, 20, 12),
-            (.clear, 23, 13)
+
+        // Labelled rather than positional: there are enough columns now that
+        // entry.0 through entry.4 would say nothing about what they hold.
+        let conditions: [(
+            condition: WeatherCondition,
+            high: Double,
+            low: Double,
+            chance: Int,
+            millimetres: Double
+        )] = [
+            (.mainlyClear, 24, 13, 0, 0),
+            (.partlyCloudy, 23, 12, 10, 0.2),
+            (.overcast, 21, 12, 25, 0.6),
+            (.rain, 19, 11, 80, 6.4),
+            (.showers, 18, 11, 65, 3.1),
+            (.partlyCloudy, 20, 12, 15, 0.4),
+            (.clear, 23, 13, 0, 0)
         ]
 
         let weekdayStyle = Date.FormatStyle().weekday(.abbreviated)
@@ -526,9 +535,11 @@ extension WidgetSnapshot {
                 date: date,
                 weekday: date.formatted(weekdayStyle),
                 isToday: index == 0,
-                condition: entry.0,
-                highCelsius: entry.1,
-                lowCelsius: entry.2
+                condition: entry.condition,
+                highCelsius: entry.high,
+                lowCelsius: entry.low,
+                precipitationProbability: entry.chance,
+                precipitationMillimeters: entry.millimetres
             )
         }
 
