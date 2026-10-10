@@ -142,7 +142,7 @@ struct ContentView: View {
                         today: report.today,
                         units: store.unitPreference
                     )
-                    ForecastCard(days: report.daily, units: store.unitPreference)
+                    ForecastCard(report: report, units: store.unitPreference)
                 }
             }
             .opacity(store.isLoading ? 0.5 : 1)
@@ -351,36 +351,36 @@ private struct DetailTile: View {
     }
 }
 
+/// The seven-day row. Clicking a day opens its hourly breakdown underneath;
+/// clicking it again, or another day, closes or switches it.
 private struct ForecastCard: View {
-    let days: [DailyForecast]
+    let report: WeatherReport
     let units: UnitPreference
 
+    /// The day whose hours are showing, if any.
+    @State private var expandedDay: DailyForecast.ID?
+
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
-            ForEach(days) { day in
-                VStack(spacing: 8) {
-                    Text(day.isToday ? "Today" : day.weekday)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(day.isToday ? .primary : .secondary)
-                    Image(systemName: day.condition.symbolName(isDaytime: true))
-                        .font(.title3)
-                        .symbolRenderingMode(.multicolor)
-                        // These symbols differ in intrinsic height — cloud.fill
-                        // is much shorter than cloud.sun.fill — so without a
-                        // fixed height every row below sits at a different
-                        // level from one column to the next.
-                        .frame(height: 24)
-                        .accessibilityHidden(true)
-                    Text(day.highCelsius.temperatureText(in: units))
-                        .font(.callout.weight(.medium))
-                    Text(day.lowCelsius.temperatureText(in: units))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    precipitationChance(for: day)
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(report.daily) { day in
+                    DayColumn(
+                        day: day,
+                        units: units,
+                        isExpanded: day.id == expandedDay,
+                        isExpandable: !report.hours(for: day).isEmpty,
+                        onToggle: { toggle(day) }
+                    )
                 }
-                .frame(maxWidth: .infinity)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(accessibilityLabel(for: day))
+            }
+
+            if let day = report.daily.first(where: { $0.id == expandedDay }) {
+                Divider()
+                HourlyStrip(hours: upcomingHours(for: day), units: units)
+                    // A fresh strip per day, so switching days starts scrolled
+                    // to the first hour instead of keeping the old offset.
+                    .id(day.id)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.vertical, 16)
@@ -389,24 +389,79 @@ private struct ForecastCard: View {
         .glassEffect(in: .rect(cornerRadius: 20))
     }
 
-    /// The droplet and percentage for a wet day. The row is reserved even when
-    /// there's no chance worth showing, so a mix of wet and dry days doesn't
-    /// leave the columns at different heights.
-    @ViewBuilder private func precipitationChance(for day: DailyForecast) -> some View {
-        HStack(spacing: 2) {
-            if let chance = day.precipitationChanceText {
-                Image(systemName: "drop.fill")
-                    .font(.system(size: 8))
-                Text(chance)
-                    .font(.caption2)
-                    .monospacedDigit()
-            }
+    private func toggle(_ day: DailyForecast) {
+        withAnimation(.snappy(duration: 0.25)) {
+            expandedDay = expandedDay == day.id ? nil : day.id
         }
-        .foregroundStyle(.secondary)
-        .frame(height: 12)
     }
 
-    private func accessibilityLabel(for day: DailyForecast) -> String {
+    /// The day's hours, minus any that have already ended. Only today has
+    /// those, and they're forecasts for the past, so they aren't worth showing.
+    private func upcomingHours(for day: DailyForecast) -> [HourlyForecast] {
+        let hours = report.hours(for: day)
+        let now = Date.now
+        let upcoming = hours.filter { $0.date.addingTimeInterval(3_600) > now }
+        // A report fetched yesterday may have nothing left for the day it
+        // calls today; showing the stale hours beats an empty strip.
+        return upcoming.isEmpty ? hours : upcoming
+    }
+}
+
+private struct DayColumn: View {
+    let day: DailyForecast
+    let units: UnitPreference
+    let isExpanded: Bool
+
+    /// False when the report carries no hours for this day, such as one
+    /// restored from the widget's cache, so there's nothing to open.
+    let isExpandable: Bool
+
+    let onToggle: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onToggle) {
+            VStack(spacing: 8) {
+                Text(day.isToday ? "Today" : day.weekday)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(day.isToday || isExpanded ? .primary : .secondary)
+                Image(systemName: day.condition.symbolName(isDaytime: true))
+                    .font(.title3)
+                    .symbolRenderingMode(.multicolor)
+                    // These symbols differ in intrinsic height — cloud.fill
+                    // is much shorter than cloud.sun.fill — so without a
+                    // fixed height every row below sits at a different
+                    // level from one column to the next.
+                    .frame(height: 24)
+                    .accessibilityHidden(true)
+                Text(day.highCelsius.temperatureText(in: units))
+                    .font(.callout.weight(.medium))
+                Text(day.lowCelsius.temperatureText(in: units))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                PrecipitationChance(text: day.precipitationChanceText)
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isExpandable)
+        .background {
+            if isExpanded || isHovered {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor.opacity(isExpanded ? 0.22 : 0.1))
+            }
+        }
+        .onHover { isHovered = isExpandable && $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(isExpanded ? "Hides the hourly forecast" : "Shows the hourly forecast")
+        .accessibilityAddTraits(isExpanded ? .isSelected : [])
+    }
+
+    private var accessibilityLabel: String {
         let name = day.isToday ? "Today" : day.weekday
         let high = day.highCelsius.temperatureText(in: units)
         let low = day.lowCelsius.temperatureText(in: units)
@@ -419,6 +474,76 @@ private struct ForecastCard: View {
             label += ", \(chance) chance of precipitation, \(amount) expected"
         }
         return label
+    }
+}
+
+/// One day's hours, scrolled sideways. Columns match the daily row's layout so
+/// the two read as one card.
+private struct HourlyStrip: View {
+    let hours: [HourlyForecast]
+    let units: UnitPreference
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(hours) { hour in
+                    let isNow = Self.isCurrent(hour)
+                    VStack(spacing: 8) {
+                        Text(isNow ? "Now" : hour.hourLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isNow ? .primary : .secondary)
+                        Image(systemName: hour.condition.symbolName(isDaytime: hour.isDaytime))
+                            .font(.title3)
+                            .symbolRenderingMode(.multicolor)
+                            .frame(height: 24)
+                            .accessibilityHidden(true)
+                        Text(hour.temperatureCelsius.temperatureText(in: units))
+                            .font(.callout.weight(.medium))
+                        PrecipitationChance(text: hour.precipitationChanceText)
+                    }
+                    .frame(width: 48)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(accessibilityLabel(for: hour, isNow: isNow))
+                }
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    private static func isCurrent(_ hour: HourlyForecast) -> Bool {
+        let now = Date.now
+        return hour.date <= now && now < hour.date.addingTimeInterval(3_600)
+    }
+
+    private func accessibilityLabel(for hour: HourlyForecast, isNow: Bool) -> String {
+        let name = isNow ? "Now" : hour.hourLabel
+        let temperature = hour.temperatureCelsius.temperatureText(in: units)
+        var label = "\(name), \(hour.condition.description), \(temperature)"
+        if let chance = hour.precipitationChanceText {
+            label += ", \(chance) chance of precipitation"
+        }
+        return label
+    }
+}
+
+/// The droplet and percentage for a wet day or hour. The row is reserved even
+/// when there's no chance worth showing, so a mix of wet and dry columns
+/// doesn't leave them at different heights.
+private struct PrecipitationChance: View {
+    let text: String?
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if let text {
+                Image(systemName: "drop.fill")
+                    .font(.system(size: 8))
+                Text(text)
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+        }
+        .foregroundStyle(.secondary)
+        .frame(height: 12)
     }
 }
 
@@ -523,6 +648,30 @@ private extension DailyForecast {
     }()
 }
 
+private extension WeatherReport {
+    /// The preview week with a full day of hours behind each entry, warming
+    /// through the afternoon and turning wet in the evening on rainy days.
+    static let preview: WeatherReport = {
+        let hourly = DailyForecast.previewWeek.flatMap { day in
+            (0..<24).map { hour in
+                let date = day.date.addingTimeInterval(Double(hour) * 3_600)
+                // Coldest at 5am, warmest at 3pm.
+                let warmth = (1 - cos(Double(hour - 5) / 10 * .pi)) / 2
+                let isWetHour = day.precipitationProbability >= 50 && hour >= 15
+                return HourlyForecast(
+                    date: date,
+                    hourLabel: date.formatted(Date.FormatStyle().hour()),
+                    condition: isWetHour ? day.condition : .mainlyClear,
+                    isDaytime: (7..<19).contains(hour),
+                    temperatureCelsius: day.lowCelsius + (day.highCelsius - day.lowCelsius) * warmth,
+                    precipitationProbability: isWetHour ? day.precipitationProbability : 0
+                )
+            }
+        }
+        return WeatherReport(current: .preview, daily: DailyForecast.previewWeek, hourly: hourly)
+    }()
+}
+
 #Preview("Cards", traits: .sizeThatFitsLayout) {
     VStack(spacing: 16) {
         CurrentConditionsCard(
@@ -531,7 +680,7 @@ private extension DailyForecast {
             today: .preview,
             units: .metric
         )
-        ForecastCard(days: DailyForecast.previewWeek, units: .metric)
+        ForecastCard(report: .preview, units: .metric)
     }
     .padding(20)
     .frame(width: 480)

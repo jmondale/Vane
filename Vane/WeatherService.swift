@@ -43,28 +43,38 @@ nonisolated struct WeatherService: Sendable {
         return response.results ?? []
     }
 
-    /// Fetches current conditions plus a daily forecast for a place. The widget
-    /// asks for fewer days than the app so it doesn't pull data it won't show.
-    func report(for place: Place, forecastDays: Int = 7) async throws -> WeatherReport {
-        let url = try Self.makeURL(
-            host: Self.forecastHost,
-            path: "/v1/forecast",
-            queryItems: [
-                URLQueryItem(name: "latitude", value: String(place.latitude)),
-                URLQueryItem(name: "longitude", value: String(place.longitude)),
+    /// Fetches current conditions plus a daily forecast for a place, and an
+    /// hourly one when `includeHourly` is set. The widget leaves hourly off and
+    /// may ask for fewer days, so it doesn't pull data it won't show.
+    func report(
+        for place: Place,
+        forecastDays: Int = 7,
+        includeHourly: Bool = false
+    ) async throws -> WeatherReport {
+        var queryItems = [
+            URLQueryItem(name: "latitude", value: String(place.latitude)),
+            URLQueryItem(name: "longitude", value: String(place.longitude)),
+            URLQueryItem(
+                name: "current",
+                value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day"
+            ),
+            URLQueryItem(
+                name: "daily",
+                value: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum"
+            ),
+            URLQueryItem(name: "timezone", value: "auto"),
+            URLQueryItem(name: "forecast_days", value: String(forecastDays))
+        ]
+        if includeHourly {
+            queryItems.append(
                 URLQueryItem(
-                    name: "current",
-                    value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day"
-                ),
-                URLQueryItem(
-                    name: "daily",
-                    value: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum"
-                ),
-                URLQueryItem(name: "timezone", value: "auto"),
-                URLQueryItem(name: "forecast_days", value: String(forecastDays))
-            ]
-        )
+                    name: "hourly",
+                    value: "temperature_2m,weather_code,precipitation_probability,is_day"
+                )
+            )
+        }
 
+        let url = try Self.makeURL(host: Self.forecastHost, path: "/v1/forecast", queryItems: queryItems)
         let response = try await fetch(ForecastResponse.self, from: url)
         return WeatherReport(
             current: CurrentWeather(
@@ -75,7 +85,10 @@ nonisolated struct WeatherService: Sendable {
                 condition: WeatherCondition(wmoCode: response.current.weatherCode),
                 isDaytime: response.current.isDay == 1
             ),
-            daily: Self.dailyForecasts(from: response.daily, timeZoneIdentifier: response.timezone)
+            daily: Self.dailyForecasts(from: response.daily, timeZoneIdentifier: response.timezone),
+            hourly: response.hourly.map {
+                Self.hourlyForecasts(from: $0, timeZoneIdentifier: response.timezone)
+            } ?? []
         )
     }
 
@@ -139,6 +152,40 @@ nonisolated struct WeatherService: Sendable {
         }
     }
 
+    private static func hourlyForecasts(
+        from hourly: ForecastResponse.Hourly,
+        timeZoneIdentifier: String?
+    ) -> [HourlyForecast] {
+        let timeZone = timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+
+        // Hour keys are ISO 8601 without seconds or an offset, e.g.
+        // "2026-10-10T14:00", again in the location's zone.
+        let hourParser = DateFormatter()
+        hourParser.locale = Locale(identifier: "en_US_POSIX")
+        hourParser.timeZone = timeZone
+        hourParser.dateFormat = "yyyy-MM-dd'T'HH:mm"
+
+        let hourStyle = Date.FormatStyle(timeZone: timeZone).hour()
+
+        let count = min(
+            hourly.time.count,
+            hourly.weatherCode.count,
+            hourly.temperature.count
+        )
+
+        return (0..<count).compactMap { index in
+            guard let date = hourParser.date(from: hourly.time[index]) else { return nil }
+            return HourlyForecast(
+                date: date,
+                hourLabel: date.formatted(hourStyle),
+                condition: WeatherCondition(wmoCode: hourly.weatherCode[index]),
+                isDaytime: value(hourly.isDay, at: index, default: 1) == 1,
+                temperatureCelsius: hourly.temperature[index],
+                precipitationProbability: value(hourly.precipitationProbability, at: index, default: 0)
+            )
+        }
+    }
+
     /// Reads one element of an optional array of optionals, falling back when
     /// the key was absent, the array is shorter than the forecast, or the entry
     /// itself is null. A missing precipitation value means "none reported", so
@@ -161,6 +208,9 @@ private nonisolated struct ForecastResponse: Decodable {
     let timezone: String?
     let current: Current
     let daily: Daily
+
+    /// Absent unless the request asked for hourly data.
+    let hourly: Hourly?
 
     struct Current: Decodable {
         let temperature: Double
@@ -199,6 +249,24 @@ private nonisolated struct ForecastResponse: Decodable {
             case temperatureMin = "temperature_2m_min"
             case precipitationProbabilityMax = "precipitation_probability_max"
             case precipitationSum = "precipitation_sum"
+        }
+    }
+
+    struct Hourly: Decodable {
+        let time: [String]
+        let weatherCode: [Int]
+        let temperature: [Double]
+
+        /// Optional for the same reasons as the daily precipitation fields.
+        let precipitationProbability: [Int?]?
+        let isDay: [Int?]?
+
+        enum CodingKeys: String, CodingKey {
+            case time
+            case weatherCode = "weather_code"
+            case temperature = "temperature_2m"
+            case precipitationProbability = "precipitation_probability"
+            case isDay = "is_day"
         }
     }
 }

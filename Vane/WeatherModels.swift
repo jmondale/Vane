@@ -163,7 +163,7 @@ nonisolated struct CurrentWeather: Codable, Sendable {
 /// loses its stale-data fallback once and refetches.
 nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     /// Below this, a chance isn't worth the visual noise in a seven-day row.
-    private static let chanceDisplayThreshold = 10
+    static let chanceDisplayThreshold = 10
 
     let date: Date
     let weekday: String
@@ -189,16 +189,64 @@ nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     }
 }
 
+/// A single hour in the forecast. Like `DailyForecast.weekday`, `hourLabel` is
+/// formatted in the location's own time zone at fetch time.
+nonisolated struct HourlyForecast: Codable, Identifiable, Sendable {
+    let date: Date
+    let hourLabel: String
+    let condition: WeatherCondition
+    let isDaytime: Bool
+    let temperatureCelsius: Double
+
+    /// Chance of measurable precipitation in this hour, 0–100.
+    let precipitationProbability: Int
+
+    var id: Date { date }
+
+    /// The chance of precipitation, or `nil` when it's low enough to omit.
+    var precipitationChanceText: String? {
+        guard precipitationProbability >= DailyForecast.chanceDisplayThreshold else { return nil }
+        return precipitationProbability.formatted(.percent)
+    }
+}
+
 /// Everything one fetch produces for a place.
 nonisolated struct WeatherReport: Codable, Sendable {
     let current: CurrentWeather
     let daily: [DailyForecast]
+
+    /// Hour-by-hour detail across every day in `daily`. Only the app asks for
+    /// it; the widget's reports leave it empty.
+    let hourly: [HourlyForecast]
+
+    init(current: CurrentWeather, daily: [DailyForecast], hourly: [HourlyForecast] = []) {
+        self.current = current
+        self.daily = daily
+        self.hourly = hourly
+    }
+
+    /// Reports cached before `hourly` existed have no such key. Decoding it as
+    /// empty keeps those caches usable instead of dropping them.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        current = try container.decode(CurrentWeather.self, forKey: .current)
+        daily = try container.decode([DailyForecast].self, forKey: .daily)
+        hourly = try container.decodeIfPresent([HourlyForecast].self, forKey: .hourly) ?? []
+    }
 
     /// Today's entry, falling back to the first day available. A report cached
     /// overnight has no day flagged as today, and its first entry is the
     /// closest thing to one.
     var today: DailyForecast? {
         daily.first { $0.isToday } ?? daily.first
+    }
+
+    /// The hours that fall on `day`. Each day's `date` is local midnight, so a
+    /// day runs until the next one starts, which also handles 23- and 25-hour
+    /// days at daylight-saving changes.
+    func hours(for day: DailyForecast) -> [HourlyForecast] {
+        let end = daily.first { $0.date > day.date }?.date ?? day.date.addingTimeInterval(86_400)
+        return hourly.filter { $0.date >= day.date && $0.date < end }
     }
 }
 

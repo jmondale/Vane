@@ -148,7 +148,7 @@ import WidgetKit
         committedQuery = place.name
 
         do {
-            let fetched = try await service.report(for: place)
+            let fetched = try await service.report(for: place, includeHourly: true)
             report = fetched
             status = .ready
 
