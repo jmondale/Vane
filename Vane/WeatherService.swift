@@ -56,7 +56,7 @@ nonisolated struct WeatherService: Sendable {
             URLQueryItem(name: "longitude", value: String(place.longitude)),
             URLQueryItem(
                 name: "current",
-                value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day"
+                value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day"
             ),
             URLQueryItem(
                 name: "daily",
@@ -83,7 +83,9 @@ nonisolated struct WeatherService: Sendable {
                 relativeHumidity: response.current.relativeHumidity,
                 windSpeedKPH: response.current.windSpeed,
                 condition: WeatherCondition(wmoCode: response.current.weatherCode),
-                isDaytime: response.current.isDay == 1
+                isDaytime: response.current.isDay == 1,
+                windDirectionDegrees: response.current.windDirection,
+                windGustKPH: response.current.windGusts
             ),
             daily: Self.dailyForecasts(from: response.daily, timeZoneIdentifier: response.timezone),
             hourly: response.hourly.map {
@@ -220,6 +222,11 @@ private nonisolated struct ForecastResponse: Decodable {
         let windSpeed: Double
         let isDay: Int
 
+        /// Optional so a model that omits them costs the vane, not the
+        /// whole forecast.
+        let windDirection: Double?
+        let windGusts: Double?
+
         enum CodingKeys: String, CodingKey {
             case temperature = "temperature_2m"
             case apparentTemperature = "apparent_temperature"
@@ -227,6 +234,8 @@ private nonisolated struct ForecastResponse: Decodable {
             case weatherCode = "weather_code"
             case windSpeed = "wind_speed_10m"
             case isDay = "is_day"
+            case windDirection = "wind_direction_10m"
+            case windGusts = "wind_gusts_10m"
         }
     }
 

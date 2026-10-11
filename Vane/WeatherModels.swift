@@ -150,6 +150,51 @@ nonisolated struct CurrentWeather: Codable, Sendable {
     let windSpeedKPH: Double
     let condition: WeatherCondition
     let isDaytime: Bool
+
+    /// The compass bearing the wind blows *from*, in degrees clockwise from
+    /// north — the meteorological convention, so 315 is a northwesterly.
+    ///
+    /// This and `windGustKPH` are optional, and default to `nil`, because the
+    /// widget's report cache predates them. Synthesized decoding treats a
+    /// missing key as `nil` for an optional, so old caches stay readable.
+    var windDirectionDegrees: Double? = nil
+
+    /// The strongest gust expected around now.
+    var windGustKPH: Double? = nil
+
+    /// Below this the wind has no meaningful direction, and an arrow pointing
+    /// anywhere would be noise.
+    static let calmThresholdKPH = 1.0
+
+    var isCalm: Bool { windSpeedKPH < Self.calmThresholdKPH }
+
+    /// The 16-point compass abbreviation for the wind's origin, e.g. "NW".
+    var windCompassPoint: String? {
+        compassIndex.map { Self.compassPoints[$0] }
+    }
+
+    /// The same, spelled out for VoiceOver, e.g. "northwest".
+    var windCompassName: String? {
+        compassIndex.map { Self.compassNames[$0] }
+    }
+
+    private var compassIndex: Int? {
+        guard let windDirectionDegrees, !isCalm else { return nil }
+        let normalized = windDirectionDegrees.truncatingRemainder(dividingBy: 360) + 360
+        return Int((normalized / 22.5).rounded()) % 16
+    }
+
+    private static let compassPoints = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+    ]
+
+    private static let compassNames = [
+        "north", "north-northeast", "northeast", "east-northeast",
+        "east", "east-southeast", "southeast", "south-southeast",
+        "south", "south-southwest", "southwest", "west-southwest",
+        "west", "west-northwest", "northwest", "north-northwest"
+    ]
 }
 
 /// A single day in the forecast. `weekday` and `isToday` are resolved in the

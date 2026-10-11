@@ -261,37 +261,53 @@ private struct CurrentConditionsCard: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 20) {
-                Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
-                    .font(.system(size: 52))
-                    .symbolRenderingMode(.multicolor)
-                    .accessibilityHidden(true)
+            HStack(alignment: .center, spacing: 0) {
+                Spacer(minLength: 0)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(current.temperatureCelsius.temperatureText(in: units))
-                        .font(.system(size: 52, weight: .light))
-                        .contentTransition(.numericText())
-                    Text(current.condition.description)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 20) {
+                    Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+                        .font(.system(size: 52))
+                        .symbolRenderingMode(.multicolor)
+                        .accessibilityHidden(true)
 
-                    // The day's full range, in the same "H:… L:…" shorthand the
-                    // widget uses, so both surfaces read the same way.
-                    if let today {
-                        HStack(spacing: 8) {
-                            Text("H:\(today.highCelsius.temperatureText(in: units))")
-                            Text("L:\(today.lowCelsius.temperatureText(in: units))")
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(current.temperatureCelsius.temperatureText(in: units))
+                            .font(.system(size: 52, weight: .light))
+                            .contentTransition(.numericText())
+                        Text(current.condition.description)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+
+                        // The day's full range, in the same "H:… L:…" shorthand the
+                        // widget uses, so both surfaces read the same way.
+                        if let today {
+                            HStack(spacing: 8) {
+                                Text("H:\(today.highCelsius.temperatureText(in: units))")
+                                Text("L:\(today.lowCelsius.temperatureText(in: units))")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .contentTransition(.numericText())
+                            .padding(.top, 2)
                         }
-                        .font(.subheadline.weight(.medium))
-                        .contentTransition(.numericText())
-                        .padding(.top, 2)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                // Spelled out, because "H:" and "L:" are read aloud as letters.
+                .accessibilityLabel(temperatureAccessibilityLabel)
+
+                // Spare width is split evenly across the outer edges and the
+                // middle, so a wider window doesn't open one big gap between
+                // the two. Equal halves read better in principle, but at the
+                // minimum width half is too narrow for the temperature.
+                Spacer(minLength: 20)
+
+                // Wind lives here rather than in the tile row below, so it
+                // isn't shown twice.
+                WindVane(current: current, units: units)
+
+                Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .combine)
-            // Spelled out, because "H:" and "L:" are read aloud as letters.
-            .accessibilityLabel(temperatureAccessibilityLabel)
 
             HStack(spacing: 12) {
                 DetailTile(
@@ -303,11 +319,6 @@ private struct CurrentConditionsCard: View {
                     symbol: "humidity.fill",
                     label: "Humidity",
                     value: current.relativeHumidity.formatted(.percent)
-                )
-                DetailTile(
-                    symbol: "wind",
-                    label: "Wind",
-                    value: current.windSpeedKPH.windSpeedText(in: units)
                 )
                 DetailTile(
                     symbol: "drop.fill",
@@ -348,6 +359,213 @@ private struct DetailTile: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A compass dial with an arrow pointing the way the wind is blowing, the
+/// speed in the middle, and where it's coming from and its gusts underneath.
+private struct WindVane: View {
+    let current: CurrentWeather
+    let units: UnitPreference
+
+    private static let dialSize: CGFloat = 116
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The arrow's rotation, kept continuous rather than wrapped to 0–360°,
+    /// so a shift from 350° to 10° swings 20° forward instead of 340° back.
+    /// `nil` hides the arrow: calm air, or a report with no direction.
+    @State private var arrowAngle: Double?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                CompassDial(size: Self.dialSize)
+                if let arrowAngle {
+                    VaneArrow()
+                        // An explicit color rather than `.primary`: on glass,
+                        // the semantic styles render shapes noticeably
+                        // washed out, while text in the same style stays crisp.
+                        .fill(colorScheme == .dark ? Color.white : Color.black)
+                        .rotationEffect(.degrees(arrowAngle))
+                        .transition(.opacity)
+                }
+                speedReadout
+            }
+            .frame(width: Self.dialSize, height: Self.dialSize)
+
+            caption
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(height: 14)
+        }
+        // Center the row on the dial alone, not the dial plus caption, so the
+        // dial lines up with the temperature beside it.
+        .alignmentGuide(VerticalAlignment.center) { _ in Self.dialSize / 2 }
+        .onAppear { arrowAngle = targetAngle }
+        .onChange(of: targetAngle) { _, newTarget in
+            // A little bounce, so a change of direction swings like a vane.
+            withAnimation(.spring(duration: 0.9, bounce: 0.35)) {
+                arrowAngle = Self.continuing(from: arrowAngle, to: newTarget)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// Where the arrow should point: downwind, opposite the bearing the wind
+    /// comes from.
+    private var targetAngle: Double? {
+        guard !current.isCalm, let from = current.windDirectionDegrees else { return nil }
+        return from + 180
+    }
+
+    /// The angle equivalent to `target` that's the shortest turn from `angle`.
+    private static func continuing(from angle: Double?, to target: Double?) -> Double? {
+        guard let target else { return nil }
+        guard let angle else { return target }
+        var delta = (target - angle).truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 }
+        if delta < -180 { delta += 360 }
+        return angle + delta
+    }
+
+    @ViewBuilder private var speedReadout: some View {
+        if current.isCalm {
+            Text("Calm")
+                .font(.callout.weight(.medium))
+        } else {
+            VStack(spacing: -2) {
+                Text(speedNumber(current.windSpeedKPH))
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text(units.speedUnit.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var caption: some View {
+        let parts = [current.windCompassPoint, gustText.map { "Gusts \($0)" }].compactMap { $0 }
+        Text(parts.joined(separator: " · "))
+    }
+
+    /// Gusts, when they're actually stronger than the steady wind as shown.
+    private var gustText: String? {
+        guard let gust = current.windGustKPH,
+              speedNumber(gust) != speedNumber(current.windSpeedKPH),
+              gust > current.windSpeedKPH
+        else { return nil }
+        return gust.windSpeedText(in: units)
+    }
+
+    /// The speed as a bare whole number, since the unit sits on its own line.
+    private func speedNumber(_ kph: Double) -> String {
+        Measurement(value: kph, unit: UnitSpeed.kilometersPerHour)
+            .converted(to: units.speedUnit)
+            .value
+            .formatted(.number.precision(.fractionLength(0)))
+    }
+
+    private var accessibilityLabel: String {
+        guard !current.isCalm else { return "Wind calm" }
+        var label = "Wind"
+        if let name = current.windCompassName {
+            label += " from the \(name)"
+        }
+        label += " at \(current.windSpeedKPH.windSpeedText(in: units))"
+        if let gustText {
+            label += ", gusts up to \(gustText)"
+        }
+        return label
+    }
+}
+
+/// The ring, tick marks, and cardinal letters behind the vane's arrow.
+private struct CompassDial: View {
+    let size: CGFloat
+
+    private static let cardinals: [(letter: String, degrees: Double)] = [
+        ("N", 0), ("E", 90), ("S", 180), ("W", 270)
+    ]
+
+    var body: some View {
+        let radius = size / 2
+
+        ZStack {
+            Circle()
+                .strokeBorder(.secondary.opacity(0.3), lineWidth: 1)
+
+            // A tick every 10°, longer every 30°, and boldest at the four
+            // cardinal points.
+            ForEach(0..<36, id: \.self) { tick in
+                let isCardinal = tick.isMultiple(of: 9)
+                Capsule()
+                    .fill(.secondary.opacity(isCardinal ? 0.9 : 0.4))
+                    .frame(width: isCardinal ? 2 : 1, height: tick.isMultiple(of: 3) ? 6 : 3)
+                    .offset(y: -(radius - 6))
+                    .rotationEffect(.degrees(Double(tick) * 10))
+            }
+
+            // Placed by offset rather than rotation, so the letters stay upright.
+            ForEach(Self.cardinals, id: \.letter) { cardinal in
+                let radians = cardinal.degrees * .pi / 180
+                Text(cardinal.letter)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(cardinal.letter == "N" ? .primary : .secondary)
+                    .offset(
+                        x: sin(radians) * (radius - 18),
+                        y: -cos(radians) * (radius - 18)
+                    )
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A weather vane's pointer, drawn pointing straight up: an arrowhead, a
+/// round counterweight for a tail, and a gap in the middle for the speed
+/// readout. The tail is deliberately unlike the head, so there's no doubt
+/// which end points downwind.
+private struct VaneArrow: Shape {
+    func path(in rect: CGRect) -> Path {
+        let midX = rect.midX
+        let midY = rect.midY
+        let unit = min(rect.width, rect.height)
+
+        // Fractions of the dial, measured from its top edge. The readout
+        // clears the middle 34%, so the head and its shaft must both fit
+        // between the ring and 0.33, or the shaft runs backwards.
+        let top = rect.minY + unit * 0.1
+        let headBase = rect.minY + unit * 0.24
+        let bottom = rect.maxY - unit * 0.15
+        let gap = unit * 0.17
+        let shaft = unit * 0.04
+        let headWidth = unit * 0.17
+        let tailRadius = unit * 0.045
+
+        var path = Path()
+
+        // Arrowhead, then the shaft from its base in to the readout.
+        path.move(to: CGPoint(x: midX, y: top))
+        path.addLine(to: CGPoint(x: midX + headWidth / 2, y: headBase))
+        path.addLine(to: CGPoint(x: midX - headWidth / 2, y: headBase))
+        path.closeSubpath()
+        path.addRect(CGRect(x: midX - shaft / 2, y: headBase, width: shaft, height: midY - gap - headBase))
+
+        // Shaft from the readout out to the counterweight.
+        path.addRect(CGRect(x: midX - shaft / 2, y: midY + gap, width: shaft, height: bottom - midY - gap))
+        path.addEllipse(in: CGRect(
+            x: midX - tailRadius,
+            y: bottom - tailRadius,
+            width: tailRadius * 2,
+            height: tailRadius * 2
+        ))
+
+        return path
     }
 }
 
@@ -601,7 +819,9 @@ private extension CurrentWeather {
         relativeHumidity: 46,
         windSpeedKPH: 11,
         condition: .partlyCloudy,
-        isDaytime: true
+        isDaytime: true,
+        windDirectionDegrees: 315,
+        windGustKPH: 24
     )
 }
 
