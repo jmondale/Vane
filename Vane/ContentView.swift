@@ -134,19 +134,26 @@ struct ContentView: View {
 
     @ViewBuilder private var content: some View {
         if let report = store.report, let place = store.place {
-            GlassEffectContainer(spacing: 16) {
-                VStack(spacing: 16) {
-                    CurrentConditionsCard(
-                        place: place,
-                        current: report.current,
-                        today: report.today,
-                        units: store.unitPreference
-                    )
-                    ForecastCard(report: report, units: store.unitPreference)
+            // Scrolls once the radar is added: the three cards together are
+            // taller than many windows, and an expanded hourly strip adds
+            // more. Scrolling over the map moves the map, not the page.
+            ScrollView {
+                GlassEffectContainer(spacing: 16) {
+                    VStack(spacing: 16) {
+                        CurrentConditionsCard(
+                            place: place,
+                            current: report.current,
+                            today: report.today,
+                            units: store.unitPreference
+                        )
+                        ForecastCard(report: report, units: store.unitPreference)
+                        RadarCard(place: place)
+                    }
                 }
+                .opacity(store.isLoading ? 0.5 : 1)
+                .animation(.easeInOut(duration: 0.2), value: store.isLoading)
             }
-            .opacity(store.isLoading ? 0.5 : 1)
-            .animation(.easeInOut(duration: 0.2), value: store.isLoading)
+            .scrollIndicators(.automatic)
         } else if store.isLoading {
             ProgressView("Loading forecast\u{2026}")
                 .padding(32)

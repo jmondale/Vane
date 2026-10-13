@@ -6,7 +6,9 @@ import SwiftUI
             ContentView()
         }
         #if os(macOS)
-        .defaultSize(width: 560, height: 600)
+        // Tall enough to show the radar below the forecast on most screens;
+        // macOS shrinks it to fit smaller ones, and the content scrolls.
+        .defaultSize(width: 560, height: 920)
         .windowResizability(.contentMinSize)
         #endif
     }
