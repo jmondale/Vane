@@ -6,6 +6,9 @@ import SwiftUI
 struct RadarCard: View {
     let place: Place
 
+    /// Taller when the card has a column to itself beside the forecast.
+    var mapHeight: CGFloat = 300
+
     @State private var store = RadarStore()
 
     /// Bumped by the recenter button; see `RadarMapView.recenterRequest`.
@@ -61,7 +64,7 @@ struct RadarCard: View {
             }
             .padding(10)
         }
-        .frame(height: 300)
+        .frame(height: mapHeight)
         .clipShape(.rect(cornerRadius: 12))
     }
 

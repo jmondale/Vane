@@ -9,6 +9,23 @@ struct ContentView: View {
 
     @FocusState private var isSearchFocused: Bool
 
+    /// Width of the area the cards lay out in, for choosing between one and
+    /// two columns. Measured rather than read from the screen or size class,
+    /// so a Mac window, an iPad split and both iPhone Duo displays all get
+    /// the layout their actual space suits.
+    @State private var contentWidth: CGFloat = 0
+
+    /// The conditions card needs about this much to keep the temperature
+    /// and wind dial side by side; past the upper bound it just spreads out.
+    private static let cardColumnWidth: ClosedRange<CGFloat> = 380...480
+
+    /// Below this, a radar beside the cards would be too narrow to read.
+    private static let minimumRadarColumnWidth: CGFloat = 280
+
+    private var usesTwoColumns: Bool {
+        contentWidth >= Self.cardColumnWidth.lowerBound + 16 + Self.minimumRadarColumnWidth
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             searchBar
@@ -154,17 +171,30 @@ struct ContentView: View {
             // Scrolls once the radar is added: the three cards together are
             // taller than many windows, and an expanded hourly strip adds
             // more. Scrolling over the map moves the map, not the page.
+            //
+            // With room for both, the radar sits beside the other two cards
+            // instead of below them. Switching layouts rather than views keeps
+            // the radar's identity, so rotating doesn't reload it.
+            let layout = usesTwoColumns
+                ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                : AnyLayout(VStackLayout(spacing: 16))
             ScrollView {
                 GlassEffectContainer(spacing: 16) {
-                    VStack(spacing: 16) {
-                        CurrentConditionsCard(
-                            place: place,
-                            current: report.current,
-                            today: report.today,
-                            units: store.unitPreference
+                    layout {
+                        VStack(spacing: 16) {
+                            CurrentConditionsCard(
+                                place: place,
+                                current: report.current,
+                                today: report.today,
+                                units: store.unitPreference
+                            )
+                            ForecastCard(report: report, units: store.unitPreference)
+                        }
+                        .frame(
+                            minWidth: usesTwoColumns ? Self.cardColumnWidth.lowerBound : nil,
+                            maxWidth: usesTwoColumns ? Self.cardColumnWidth.upperBound : .infinity
                         )
-                        ForecastCard(report: report, units: store.unitPreference)
-                        RadarCard(place: place)
+                        RadarCard(place: place, mapHeight: usesTwoColumns ? 400 : 300)
                     }
                 }
                 .opacity(store.isLoading ? 0.5 : 1)
@@ -172,6 +202,7 @@ struct ContentView: View {
             }
             .scrollIndicators(.automatic)
             .scrollDismissesKeyboard(.immediately)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         } else if store.isLoading {
             ProgressView("Loading forecast\u{2026}")
                 .padding(32)
@@ -286,52 +317,33 @@ private struct CurrentConditionsCard: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 0) {
-                Spacer(minLength: 0)
+            // Side by side where they fit; on narrower spaces, such as iPhone
+            // Duo's outer display, the dial drops below the temperature
+            // rather than squeezing it onto two lines.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 0) {
+                    Spacer(minLength: 0)
 
-                HStack(alignment: .center, spacing: 20) {
-                    Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
-                        .font(.system(size: 52))
-                        .symbolRenderingMode(.multicolor)
-                        .accessibilityHidden(true)
+                    temperature
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(current.temperatureCelsius.temperatureText(in: units))
-                            .font(.system(size: 52, weight: .light))
-                            .contentTransition(.numericText())
-                        Text(current.condition.description)
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
+                    // Spare width is split evenly across the outer edges and the
+                    // middle, so a wider window doesn't open one big gap between
+                    // the two. Equal halves read better in principle, but at the
+                    // minimum width half is too narrow for the temperature.
+                    Spacer(minLength: 20)
 
-                        // The day's full range, in the same "H:… L:…" shorthand the
-                        // widget uses, so both surfaces read the same way.
-                        if let today {
-                            HStack(spacing: 8) {
-                                Text("H:\(today.highCelsius.temperatureText(in: units))")
-                                Text("L:\(today.lowCelsius.temperatureText(in: units))")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.subheadline.weight(.medium))
-                            .contentTransition(.numericText())
-                            .padding(.top, 2)
-                        }
-                    }
+                    // Wind lives here rather than in the tile row below, so it
+                    // isn't shown twice.
+                    WindVane(current: current, units: units)
+
+                    Spacer(minLength: 0)
                 }
-                .accessibilityElement(children: .combine)
-                // Spelled out, because "H:" and "L:" are read aloud as letters.
-                .accessibilityLabel(temperatureAccessibilityLabel)
 
-                // Spare width is split evenly across the outer edges and the
-                // middle, so a wider window doesn't open one big gap between
-                // the two. Equal halves read better in principle, but at the
-                // minimum width half is too narrow for the temperature.
-                Spacer(minLength: 20)
-
-                // Wind lives here rather than in the tile row below, so it
-                // isn't shown twice.
-                WindVane(current: current, units: units)
-
-                Spacer(minLength: 0)
+                VStack(spacing: 16) {
+                    temperature
+                    WindVane(current: current, units: units)
+                }
+                .frame(maxWidth: .infinity)
             }
 
             HStack(spacing: 12) {
@@ -355,6 +367,42 @@ private struct CurrentConditionsCard: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(in: .rect(cornerRadius: 20))
+    }
+
+    private var temperature: some View {
+        HStack(alignment: .center, spacing: 20) {
+            Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+                .font(.system(size: 52))
+                .symbolRenderingMode(.multicolor)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(current.temperatureCelsius.temperatureText(in: units))
+                    .font(.system(size: 52, weight: .light))
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                Text(current.condition.description)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                // The day's full range, in the same "H:… L:…" shorthand the
+                // widget uses, so both surfaces read the same way.
+                if let today {
+                    HStack(spacing: 8) {
+                        Text("H:\(today.highCelsius.temperatureText(in: units))")
+                        Text("L:\(today.lowCelsius.temperatureText(in: units))")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        // Spelled out, because "H:" and "L:" are read aloud as letters.
+        .accessibilityLabel(temperatureAccessibilityLabel)
     }
 
     private var temperatureAccessibilityLabel: String {
