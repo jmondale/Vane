@@ -6,8 +6,10 @@ import SwiftUI
 struct RadarCard: View {
     let place: Place
 
-    /// Taller when the card has a column to itself beside the forecast.
-    var mapHeight: CGFloat = 300
+    /// When set, the card is this tall and the map takes whatever the header
+    /// and controls leave, so a radar with a column to itself can fill the
+    /// screen. Otherwise the map is a fixed height within a scrolling page.
+    var height: CGFloat?
 
     @State private var store = RadarStore()
 
@@ -22,6 +24,7 @@ struct RadarCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
+        .frame(height: height)
         .glassEffect(in: .rect(cornerRadius: 20))
         .task { await store.keepFresh() }
         .task(id: store.isPlaying) { await store.play() }
@@ -64,7 +67,7 @@ struct RadarCard: View {
             }
             .padding(10)
         }
-        .frame(height: mapHeight)
+        .frame(height: height == nil ? 300 : nil)
         .clipShape(.rect(cornerRadius: 12))
     }
 

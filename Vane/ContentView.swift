@@ -9,11 +9,16 @@ struct ContentView: View {
 
     @FocusState private var isSearchFocused: Bool
 
-    /// Width of the area the cards lay out in, for choosing between one and
-    /// two columns. Measured rather than read from the screen or size class,
-    /// so a Mac window, an iPad split and both iPhone Duo displays all get
-    /// the layout their actual space suits.
-    @State private var contentWidth: CGFloat = 0
+    /// Size of the area the cards lay out in, for choosing between one and
+    /// two columns and for how tall a radar column can be. Measured rather
+    /// than read from the screen or size class, so a Mac window, an iPad
+    /// split and both iPhone Duo displays all get the layout their actual
+    /// space suits.
+    @State private var contentSize: CGSize = .zero
+
+    /// A radar column never shrinks below this, so a short window scrolls
+    /// rather than squashing the map.
+    private static let minimumRadarColumnHeight: CGFloat = 520
 
     /// The conditions card needs about this much to keep the temperature
     /// and wind dial side by side; past the upper bound it just spreads out.
@@ -23,7 +28,7 @@ struct ContentView: View {
     private static let minimumRadarColumnWidth: CGFloat = 280
 
     private var usesTwoColumns: Bool {
-        contentWidth >= Self.cardColumnWidth.lowerBound + 16 + Self.minimumRadarColumnWidth
+        contentSize.width >= Self.cardColumnWidth.lowerBound + 16 + Self.minimumRadarColumnWidth
     }
 
     var body: some View {
@@ -194,7 +199,14 @@ struct ContentView: View {
                             minWidth: usesTwoColumns ? Self.cardColumnWidth.lowerBound : nil,
                             maxWidth: usesTwoColumns ? Self.cardColumnWidth.upperBound : .infinity
                         )
-                        RadarCard(place: place, mapHeight: usesTwoColumns ? 400 : 300)
+                        // Beside the cards, the radar runs the full height of
+                        // the page so large screens aren't left half empty.
+                        RadarCard(
+                            place: place,
+                            height: usesTwoColumns
+                                ? max(contentSize.height, Self.minimumRadarColumnHeight)
+                                : nil
+                        )
                     }
                 }
                 .opacity(store.isLoading ? 0.5 : 1)
@@ -202,7 +214,7 @@ struct ContentView: View {
             }
             .scrollIndicators(.automatic)
             .scrollDismissesKeyboard(.immediately)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
         } else if store.isLoading {
             ProgressView("Loading forecast\u{2026}")
                 .padding(32)
