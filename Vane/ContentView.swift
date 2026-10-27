@@ -7,6 +7,8 @@ struct ContentView: View {
     /// typed text itself is what Return will submit.
     @State private var highlightedSuggestion: Place.ID?
 
+    @FocusState private var isSearchFocused: Bool
+
     var body: some View {
         VStack(spacing: 16) {
             searchBar
@@ -56,6 +58,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search for a city", text: $store.query)
                     .textFieldStyle(.plain)
+                    .focused($isSearchFocused)
                     .onSubmit(submit)
                     .onKeyPress(.downArrow) { moveHighlight(by: 1) }
                     .onKeyPress(.upArrow) { moveHighlight(by: -1) }
@@ -90,12 +93,22 @@ struct ContentView: View {
     }
 
     private func select(_ place: Place) {
+        dismissKeyboard()
         Task { await store.select(place) }
+    }
+
+    /// On iPhone the keyboard would otherwise stay up over the forecast once
+    /// a city is chosen. The Mac keeps focus in the field.
+    private func dismissKeyboard() {
+        #if os(iOS)
+        isSearchFocused = false
+        #endif
     }
 
     /// Return picks the highlighted suggestion, or falls back to searching the
     /// typed text and loading its best match.
     private func submit() {
+        dismissKeyboard()
         if let id = highlightedSuggestion,
            let place = store.suggestions.first(where: { $0.id == id }) {
             select(place)
@@ -158,6 +171,7 @@ struct ContentView: View {
                 .animation(.easeInOut(duration: 0.2), value: store.isLoading)
             }
             .scrollIndicators(.automatic)
+            .scrollDismissesKeyboard(.immediately)
         } else if store.isLoading {
             ProgressView("Loading forecast\u{2026}")
                 .padding(32)
