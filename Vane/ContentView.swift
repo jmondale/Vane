@@ -32,7 +32,11 @@ struct ContentView: View {
             .animation(.easeOut(duration: 0.15), value: store.suggestions)
         }
         .padding(20)
+        // A floor for the Mac window only; on iPhone it would push the
+        // layout wider than the screen.
+        #if os(macOS)
         .frame(minWidth: 480, minHeight: 540)
+        #endif
         .background(conditionBackground)
         .task { await store.restoreSelectedPlace() }
         .task(id: store.query) { await store.updateSuggestions() }
