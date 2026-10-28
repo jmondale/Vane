@@ -1,0 +1,5 @@
+# Build output and archives
+build/
+
+# Xcode per-user state
+xcuserdata/
