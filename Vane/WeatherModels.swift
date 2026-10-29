@@ -1,6 +1,10 @@
 import Foundation
 
-/// A geocoded location returned by the Open-Meteo geocoding API.
+/// A geocoded location, found through MapKit search.
+///
+/// Places saved by earlier builds came from Open-Meteo's geocoder and carry
+/// its GeoNames ids; they keep working, since an id is only ever matched,
+/// never looked up anywhere.
 nonisolated struct Place: Codable, Identifiable, Hashable, Sendable {
     let id: Int
     let name: String
@@ -8,6 +12,23 @@ nonisolated struct Place: Codable, Identifiable, Hashable, Sendable {
     let longitude: Double
     let country: String?
     let admin1: String?
+
+    /// The place's own time zone, which day and hour labels are written in.
+    /// Optional because places saved before WeatherKit don't have one; the
+    /// service looks it up when it's missing.
+    var timeZoneIdentifier: String? = nil
+
+    /// A stable id for a place MapKit found, which has no numeric id of its
+    /// own: the coordinate on a grid of hundredths of a degree, about a
+    /// kilometre. Searching for the same city again lands on the same id, so
+    /// widgets and caches keyed by it keep matching. The smallest value,
+    /// around 60° south, is billions, far above any GeoNames id an older
+    /// saved place might hold.
+    static func id(latitude: Double, longitude: Double) -> Int {
+        let row = Int(((latitude + 90) * 100).rounded())
+        let column = Int(((longitude + 180) * 100).rounded())
+        return row * 1_000_000 + column
+    }
 
     /// The administrative region and country, e.g. "California, United States".
     var region: String {
@@ -55,7 +76,8 @@ nonisolated enum UnitPreference: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// A weather condition, mapped from the WMO code that Open-Meteo reports.
+/// A weather condition, mapped from WeatherKit's conditions. The case names
+/// date from Open-Meteo's WMO codes, which earlier builds used.
 ///
 /// The raw values are persisted in the widget's report cache, so treat them as
 /// a storage contract: add cases freely, but don't rename an existing one.
@@ -75,29 +97,10 @@ nonisolated enum WeatherCondition: String, Codable, Hashable, Sendable {
     case snowShowers
     case thunderstorm
     case thunderstormWithHail
+    case hail
+    case haze
+    case windy
     case unknown
-
-    /// WMO 4677 weather interpretation codes, as documented by Open-Meteo.
-    init(wmoCode code: Int) {
-        switch code {
-        case 0: self = .clear
-        case 1: self = .mainlyClear
-        case 2: self = .partlyCloudy
-        case 3: self = .overcast
-        case 45, 48: self = .fog
-        case 51, 53, 55: self = .drizzle
-        case 56, 57: self = .freezingDrizzle
-        case 61, 63, 65: self = .rain
-        case 66, 67: self = .freezingRain
-        case 71, 73, 75: self = .snow
-        case 77: self = .snowGrains
-        case 80, 81, 82: self = .showers
-        case 85, 86: self = .snowShowers
-        case 95: self = .thunderstorm
-        case 96, 99: self = .thunderstormWithHail
-        default: self = .unknown
-        }
-    }
 
     var description: String {
         switch self {
@@ -116,6 +119,9 @@ nonisolated enum WeatherCondition: String, Codable, Hashable, Sendable {
         case .snowShowers: "Snow showers"
         case .thunderstorm: "Thunderstorm"
         case .thunderstormWithHail: "Thunderstorm with hail"
+        case .hail: "Hail"
+        case .haze: "Haze"
+        case .windy: "Windy"
         case .unknown: "Unknown"
         }
     }
@@ -137,6 +143,9 @@ nonisolated enum WeatherCondition: String, Codable, Hashable, Sendable {
         case .snowShowers: "cloud.snow.fill"
         case .thunderstorm: "cloud.bolt.rain.fill"
         case .thunderstormWithHail: "cloud.bolt.rain.fill"
+        case .hail: "cloud.hail.fill"
+        case .haze: isDaytime ? "sun.haze.fill" : "moon.haze.fill"
+        case .windy: "wind"
         case .unknown: "questionmark.circle.fill"
         }
     }
@@ -217,8 +226,7 @@ nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     let highCelsius: Double
     let lowCelsius: Double
 
-    /// Chance of measurable precipitation, 0–100. Open-Meteo reports no single
-    /// daily figure, so this is the day's maximum hourly probability.
+    /// Chance of measurable precipitation over the day, 0–100.
     let precipitationProbability: Int
 
     /// Total expected precipitation, as liquid water equivalent — snow is

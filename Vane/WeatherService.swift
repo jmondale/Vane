@@ -1,46 +1,59 @@
+import CoreLocation
 import Foundation
+import MapKit
+import WeatherKit
 
-/// Fetches place lookups and forecasts from Open-Meteo, which is free and
-/// needs no API key. Forecast values always arrive in metric units and are
-/// converted for display, so changing units never triggers a refetch.
+/// Finds places with MapKit search and fetches their forecasts from Apple's
+/// WeatherKit. Forecast values are stored in metric units and converted for
+/// display, so changing units never triggers a refetch.
+///
+/// WeatherKit's types share names with this app's own (`WeatherService`,
+/// `CurrentWeather`, `WeatherCondition`), so its types are always written
+/// with the `WeatherKit.` prefix here.
 nonisolated struct WeatherService: Sendable {
-    enum ServiceError: LocalizedError {
-        case invalidURL
-        case requestFailed(status: Int)
-
-        var errorDescription: String? {
-            switch self {
-            case .invalidURL:
-                "Couldn't build the request URL."
-            case .requestFailed(let status):
-                "The weather service responded with status \(status)."
-            }
-        }
-    }
-
-    private static let geocodingHost = "geocoding-api.open-meteo.com"
-    private static let forecastHost = "api.open-meteo.com"
-
-    private let session: URLSession = .shared
+    /// How many search results to offer. The completion list shows six.
+    private static let maximumPlaces = 8
 
     /// Looks up places matching a free-text query, best match first. The query
     /// may include a region qualifier, e.g. "Moab, UT". Returns an empty array
     /// when nothing matches, which is normal for a partially typed name.
     func places(matching query: String) async throws -> [Place] {
-        let language = Locale.current.language.languageCode?.identifier ?? "en"
-        let url = try Self.makeURL(
-            host: Self.geocodingHost,
-            path: "/v1/search",
-            queryItems: [
-                URLQueryItem(name: "name", value: query),
-                URLQueryItem(name: "count", value: "8"),
-                URLQueryItem(name: "language", value: language),
-                URLQueryItem(name: "format", value: "json")
-            ]
-        )
+        try await Self.search(query)
+    }
 
-        let response = try await fetch(GeocodingResponse.self, from: url)
-        return response.results ?? []
+    /// A plain `MKLocalSearch` answers with its single best match, so
+    /// "Portland" would never offer Maine. The completer behind Maps'
+    /// suggestion list returns every likely city; each is then looked up for
+    /// its coordinate, all at once. MapKit's search classes expect the main
+    /// thread.
+    @MainActor private static func search(_ query: String) async throws -> [Place] {
+        let completions = try await CityCompleter().completions(for: query)
+            .prefix(maximumPlaces)
+
+        let found = await withTaskGroup(of: (Int, Place?).self) { group in
+            for (rank, completion) in completions.enumerated() {
+                let request = MKLocalSearch.Request(completion: completion)
+                request.resultTypes = .address
+                request.addressFilter = MKAddressFilter(including: .locality)
+                group.addTask { @MainActor in
+                    let item = try? await MKLocalSearch(request: request).start().mapItems.first
+                    return (rank, item.flatMap(place(from:)))
+                }
+            }
+            var found: [(Int, Place?)] = []
+            for await result in group {
+                found.append(result)
+            }
+            return found
+        }
+
+        // Back in the completer's order, keeping the first of any two that
+        // land on the same spot.
+        var seenIDs = Set<Place.ID>()
+        return found
+            .sorted { $0.0 < $1.0 }
+            .compactMap(\.1)
+            .filter { seenIDs.insert($0.id).inserted }
     }
 
     /// Fetches current conditions plus a daily forecast for a place, and an
@@ -51,231 +64,215 @@ nonisolated struct WeatherService: Sendable {
         forecastDays: Int = 7,
         includeHourly: Bool = false
     ) async throws -> WeatherReport {
-        var queryItems = [
-            URLQueryItem(name: "latitude", value: String(place.latitude)),
-            URLQueryItem(name: "longitude", value: String(place.longitude)),
-            URLQueryItem(
-                name: "current",
-                value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day"
-            ),
-            URLQueryItem(
-                name: "daily",
-                value: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum"
-            ),
-            URLQueryItem(name: "timezone", value: "auto"),
-            URLQueryItem(name: "forecast_days", value: String(forecastDays))
-        ]
+        let location = CLLocation(latitude: place.latitude, longitude: place.longitude)
+        let timeZone = await Self.timeZone(for: place, at: location)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let today = calendar.startOfDay(for: .now)
+        let end = calendar.date(byAdding: .day, value: forecastDays, to: today) ?? today.addingTimeInterval(Double(forecastDays) * 86_400)
+
+        let service = WeatherKit.WeatherService.shared
+        let current: WeatherKit.CurrentWeather
+        let days: WeatherKit.Forecast<DayWeather>
+        var hours: WeatherKit.Forecast<HourWeather>?
         if includeHourly {
-            queryItems.append(
-                URLQueryItem(
-                    name: "hourly",
-                    value: "temperature_2m,weather_code,precipitation_probability,is_day"
-                )
+            (current, days, hours) = try await service.weather(
+                for: location,
+                including: .current,
+                .daily(startDate: today, endDate: end),
+                .hourly(startDate: today, endDate: end)
+            )
+        } else {
+            (current, days) = try await service.weather(
+                for: location,
+                including: .current,
+                .daily(startDate: today, endDate: end)
             )
         }
 
-        let url = try Self.makeURL(host: Self.forecastHost, path: "/v1/forecast", queryItems: queryItems)
-        let response = try await fetch(ForecastResponse.self, from: url)
         return WeatherReport(
             current: CurrentWeather(
-                temperatureCelsius: response.current.temperature,
-                apparentTemperatureCelsius: response.current.apparentTemperature,
-                relativeHumidity: response.current.relativeHumidity,
-                windSpeedKPH: response.current.windSpeed,
-                condition: WeatherCondition(wmoCode: response.current.weatherCode),
-                isDaytime: response.current.isDay == 1,
-                windDirectionDegrees: response.current.windDirection,
-                windGustKPH: response.current.windGusts
+                temperatureCelsius: current.temperature.converted(to: .celsius).value,
+                apparentTemperatureCelsius: current.apparentTemperature.converted(to: .celsius).value,
+                relativeHumidity: Int((current.humidity * 100).rounded()),
+                windSpeedKPH: current.wind.speed.converted(to: .kilometersPerHour).value,
+                condition: WeatherCondition(current.condition),
+                isDaytime: current.isDaylight,
+                windDirectionDegrees: current.wind.direction.converted(to: .degrees).value,
+                windGustKPH: current.wind.gust?.converted(to: .kilometersPerHour).value
             ),
-            daily: Self.dailyForecasts(from: response.daily, timeZoneIdentifier: response.timezone),
-            hourly: response.hourly.map {
-                Self.hourlyForecasts(from: $0, timeZoneIdentifier: response.timezone)
-            } ?? []
+            daily: Self.dailyForecasts(from: days, calendar: calendar),
+            hourly: hours.map { Self.hourlyForecasts(from: $0, timeZone: timeZone) } ?? []
         )
     }
 
-    // MARK: - Networking
+    /// The credit WeatherKit's terms require wherever its data is shown: the
+    /// Apple Weather mark and a link to the legal attribution page.
+    func attribution() async throws -> WeatherKit.WeatherAttribution {
+        try await WeatherKit.WeatherService.shared.attribution
+    }
 
-    private func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        let (data, response) = try await session.data(from: url)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw ServiceError.requestFailed(status: http.statusCode)
+    // MARK: - Places
+
+    /// A search result as a `Place`, or `nil` for one with no usable name.
+    private static func place(from item: MKMapItem) -> Place? {
+        let coordinate = item.location.coordinate
+        let representations = item.addressRepresentations
+        guard let name = representations?.cityName ?? item.name else { return nil }
+
+        return Place(
+            id: Place.id(latitude: coordinate.latitude, longitude: coordinate.longitude),
+            name: name,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            country: representations?.regionName,
+            admin1: region(of: representations, city: name),
+            timeZoneIdentifier: item.timeZone?.identifier
+        )
+    }
+
+    /// The state or province, which MapKit only offers inside the city's
+    /// "with context" form: "Seattle, WA" gives "WA". `nil` when there's no
+    /// context beyond the city and country.
+    private static func region(of representations: MKAddressRepresentations?, city: String) -> String? {
+        guard let context = representations?.cityWithContext(.full) else { return nil }
+        let country = representations?.regionName ?? ""
+        return context
+            .split(separator: ",")
+            .map { part in
+                // Some results run the country into the region
+                // ("CA United States"), and it's shown separately.
+                var part = part.trimmingCharacters(in: .whitespaces)
+                if !country.isEmpty, part.hasSuffix(country) {
+                    part = String(part.dropLast(country.count)).trimmingCharacters(in: .whitespaces)
+                }
+                return part
+            }
+            .first { !$0.isEmpty && $0 != city && $0 != country }
+    }
+
+    /// The place's time zone, looked up from its coordinate when it was saved
+    /// without one. Falls back to the device's zone if that fails too.
+    private static func timeZone(for place: Place, at location: CLLocation) async -> TimeZone {
+        if let identifier = place.timeZoneIdentifier, let zone = TimeZone(identifier: identifier) {
+            return zone
         }
-        return try JSONDecoder().decode(type, from: data)
+        guard let request = MKReverseGeocodingRequest(location: location),
+              let item = try? await request.mapItems.first,
+              let zone = item.timeZone
+        else { return .current }
+        return zone
     }
 
-    private static func makeURL(host: String, path: String, queryItems: [URLQueryItem]) throws -> URL {
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = host
-        components.path = path
-        components.queryItems = queryItems
-        guard let url = components.url else { throw ServiceError.invalidURL }
-        return url
-    }
-
-    // MARK: - Parsing
+    // MARK: - Forecasts
 
     private static func dailyForecasts(
-        from daily: ForecastResponse.Daily,
-        timeZoneIdentifier: String?
+        from days: WeatherKit.Forecast<DayWeather>,
+        calendar: Calendar
     ) -> [DailyForecast] {
-        let timeZone = timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+        let weekdayStyle = Date.FormatStyle(timeZone: calendar.timeZone).weekday(.abbreviated)
 
-        // Open-Meteo returns plain "yyyy-MM-dd" day keys in the location's zone.
-        let dayParser = DateFormatter()
-        dayParser.locale = Locale(identifier: "en_US_POSIX")
-        dayParser.timeZone = timeZone
-        dayParser.dateFormat = "yyyy-MM-dd"
-
-        let weekdayStyle = Date.FormatStyle(timeZone: timeZone).weekday(.abbreviated)
-
-        var calendar = Calendar.current
-        calendar.timeZone = timeZone
-
-        let count = min(
-            daily.time.count,
-            daily.weatherCode.count,
-            min(daily.temperatureMax.count, daily.temperatureMin.count)
-        )
-
-        return (0..<count).compactMap { index in
-            guard let date = dayParser.date(from: daily.time[index]) else { return nil }
+        return days.map { day in
+            // WeatherKit marks each day by its start in the place's own zone.
+            let date = calendar.startOfDay(for: day.date)
             return DailyForecast(
                 date: date,
                 weekday: date.formatted(weekdayStyle),
-                isToday: calendar.isDateInToday(date),
-                condition: WeatherCondition(wmoCode: daily.weatherCode[index]),
-                highCelsius: daily.temperatureMax[index],
-                lowCelsius: daily.temperatureMin[index],
-                precipitationProbability: value(daily.precipitationProbabilityMax, at: index, default: 0),
-                precipitationMillimeters: value(daily.precipitationSum, at: index, default: 0)
+                isToday: calendar.isDate(date, inSameDayAs: .now),
+                condition: WeatherCondition(day.condition),
+                highCelsius: day.highTemperature.converted(to: .celsius).value,
+                lowCelsius: day.lowTemperature.converted(to: .celsius).value,
+                precipitationProbability: Int((day.precipitationChance * 100).rounded()),
+                // All types together, snow as its liquid equivalent.
+                precipitationMillimeters: day.precipitationAmountByType.precipitation.converted(to: .millimeters).value
             )
         }
     }
 
     private static func hourlyForecasts(
-        from hourly: ForecastResponse.Hourly,
-        timeZoneIdentifier: String?
+        from hours: WeatherKit.Forecast<HourWeather>,
+        timeZone: TimeZone
     ) -> [HourlyForecast] {
-        let timeZone = timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
-
-        // Hour keys are ISO 8601 without seconds or an offset, e.g.
-        // "2026-10-10T14:00", again in the location's zone.
-        let hourParser = DateFormatter()
-        hourParser.locale = Locale(identifier: "en_US_POSIX")
-        hourParser.timeZone = timeZone
-        hourParser.dateFormat = "yyyy-MM-dd'T'HH:mm"
-
         let hourStyle = Date.FormatStyle(timeZone: timeZone).hour()
 
-        let count = min(
-            hourly.time.count,
-            hourly.weatherCode.count,
-            hourly.temperature.count
-        )
-
-        return (0..<count).compactMap { index in
-            guard let date = hourParser.date(from: hourly.time[index]) else { return nil }
-            return HourlyForecast(
-                date: date,
-                hourLabel: date.formatted(hourStyle),
-                condition: WeatherCondition(wmoCode: hourly.weatherCode[index]),
-                isDaytime: value(hourly.isDay, at: index, default: 1) == 1,
-                temperatureCelsius: hourly.temperature[index],
-                precipitationProbability: value(hourly.precipitationProbability, at: index, default: 0)
+        return hours.map { hour in
+            HourlyForecast(
+                date: hour.date,
+                hourLabel: hour.date.formatted(hourStyle),
+                condition: WeatherCondition(hour.condition),
+                isDaytime: hour.isDaylight,
+                temperatureCelsius: hour.temperature.converted(to: .celsius).value,
+                precipitationProbability: Int((hour.precipitationChance * 100).rounded())
             )
         }
     }
+}
 
-    /// Reads one element of an optional array of optionals, falling back when
-    /// the key was absent, the array is shorter than the forecast, or the entry
-    /// itself is null. A missing precipitation value means "none reported", so
-    /// it must not drop the whole day from the forecast.
-    private static func value<T>(_ array: [T?]?, at index: Int, default fallback: T) -> T {
-        guard let array, array.indices.contains(index), let value = array[index] else {
-            return fallback
+/// One query's worth of `MKLocalSearchCompleter` results, awaited instead of
+/// delegated. Single use: the completer reports through its delegate, and a
+/// fresh one per query means no answer can arrive for the wrong question.
+@MainActor private final class CityCompleter: NSObject, MKLocalSearchCompleterDelegate {
+    private let completer = MKLocalSearchCompleter()
+    private var continuation: CheckedContinuation<[MKLocalSearchCompletion], any Error>?
+
+    func completions(for query: String) async throws -> [MKLocalSearchCompletion] {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            completer.delegate = self
+            completer.resultTypes = .address
+            // Cities only. Without this, streets named after the city
+            // ("Seattle St" in Modesto) crowd out the cities themselves.
+            completer.addressFilter = MKAddressFilter(including: .locality)
+            completer.queryFragment = query
         }
-        return value
+    }
+
+    nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        MainActor.assumeIsolated {
+            continuation?.resume(returning: completer.results)
+            continuation = nil
+        }
+    }
+
+    nonisolated func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: any Error) {
+        MainActor.assumeIsolated {
+            // No match is an ordinary answer for a half-typed name.
+            if let error = error as? MKError, error.code == .placemarkNotFound {
+                continuation?.resume(returning: [])
+            } else {
+                continuation?.resume(throwing: error)
+            }
+            continuation = nil
+        }
     }
 }
 
-// MARK: - Wire format
-
-private nonisolated struct GeocodingResponse: Decodable {
-    let results: [Place]?
-}
-
-private nonisolated struct ForecastResponse: Decodable {
-    let timezone: String?
-    let current: Current
-    let daily: Daily
-
-    /// Absent unless the request asked for hourly data.
-    let hourly: Hourly?
-
-    struct Current: Decodable {
-        let temperature: Double
-        let apparentTemperature: Double
-        let relativeHumidity: Int
-        let weatherCode: Int
-        let windSpeed: Double
-        let isDay: Int
-
-        /// Optional so a model that omits them costs the vane, not the
-        /// whole forecast.
-        let windDirection: Double?
-        let windGusts: Double?
-
-        enum CodingKeys: String, CodingKey {
-            case temperature = "temperature_2m"
-            case apparentTemperature = "apparent_temperature"
-            case relativeHumidity = "relative_humidity_2m"
-            case weatherCode = "weather_code"
-            case windSpeed = "wind_speed_10m"
-            case isDay = "is_day"
-            case windDirection = "wind_direction_10m"
-            case windGusts = "wind_gusts_10m"
-        }
-    }
-
-    struct Daily: Decodable {
-        let time: [String]
-        let weatherCode: [Int]
-        let temperatureMax: [Double]
-        let temperatureMin: [Double]
-
-        /// Doubly optional on purpose. Open-Meteo omits these keys entirely if
-        /// the model doesn't supply them, and returns `null` entries past the
-        /// probability horizon, which is shorter than the forecast itself.
-        let precipitationProbabilityMax: [Int?]?
-        let precipitationSum: [Double?]?
-
-        enum CodingKeys: String, CodingKey {
-            case time
-            case weatherCode = "weather_code"
-            case temperatureMax = "temperature_2m_max"
-            case temperatureMin = "temperature_2m_min"
-            case precipitationProbabilityMax = "precipitation_probability_max"
-            case precipitationSum = "precipitation_sum"
-        }
-    }
-
-    struct Hourly: Decodable {
-        let time: [String]
-        let weatherCode: [Int]
-        let temperature: [Double]
-
-        /// Optional for the same reasons as the daily precipitation fields.
-        let precipitationProbability: [Int?]?
-        let isDay: [Int?]?
-
-        enum CodingKeys: String, CodingKey {
-            case time
-            case weatherCode = "weather_code"
-            case temperature = "temperature_2m"
-            case precipitationProbability = "precipitation_probability"
-            case isDay = "is_day"
+extension WeatherCondition {
+    /// Folds WeatherKit's conditions into this app's smaller set. Conditions
+    /// that describe temperature rather than sky, such as hot or frigid, read
+    /// as clear, which is what they almost always come with.
+    nonisolated init(_ condition: WeatherKit.WeatherCondition) {
+        switch condition {
+        case .clear, .hot, .frigid: self = .clear
+        case .mostlyClear: self = .mainlyClear
+        case .partlyCloudy: self = .partlyCloudy
+        case .mostlyCloudy, .cloudy: self = .overcast
+        case .foggy: self = .fog
+        case .haze, .smoky, .blowingDust: self = .haze
+        case .breezy, .windy: self = .windy
+        case .drizzle: self = .drizzle
+        case .freezingDrizzle: self = .freezingDrizzle
+        case .rain, .heavyRain: self = .rain
+        case .sunShowers: self = .showers
+        case .freezingRain, .sleet, .wintryMix: self = .freezingRain
+        case .hail: self = .hail
+        case .snow, .heavySnow, .blizzard, .blowingSnow: self = .snow
+        case .flurries, .sunFlurries: self = .snowShowers
+        case .isolatedThunderstorms, .scatteredThunderstorms, .thunderstorms, .strongStorms,
+             .tropicalStorm, .hurricane:
+            self = .thunderstorm
+        @unknown default: self = .unknown
         }
     }
 }

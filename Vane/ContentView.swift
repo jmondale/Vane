@@ -184,33 +184,39 @@ struct ContentView: View {
                 ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
                 : AnyLayout(VStackLayout(spacing: 16))
             ScrollView {
-                GlassEffectContainer(spacing: 16) {
-                    layout {
-                        VStack(spacing: 16) {
-                            CurrentConditionsCard(
-                                place: place,
-                                current: report.current,
-                                today: report.today,
-                                units: store.unitPreference
+                VStack(spacing: 16) {
+                    GlassEffectContainer(spacing: 16) {
+                        layout {
+                            VStack(spacing: 16) {
+                                CurrentConditionsCard(
+                                    place: place,
+                                    current: report.current,
+                                    today: report.today,
+                                    units: store.unitPreference
+                                )
+                                ForecastCard(report: report, units: store.unitPreference)
+                            }
+                            .frame(
+                                minWidth: usesTwoColumns ? Self.cardColumnWidth.lowerBound : nil,
+                                maxWidth: usesTwoColumns ? Self.cardColumnWidth.upperBound : .infinity
                             )
-                            ForecastCard(report: report, units: store.unitPreference)
+                            // Beside the cards, the radar runs the full height of
+                            // the page so large screens aren't left half empty.
+                            RadarCard(
+                                place: place,
+                                height: usesTwoColumns
+                                    ? max(contentSize.height, Self.minimumRadarColumnHeight)
+                                    : nil
+                            )
                         }
-                        .frame(
-                            minWidth: usesTwoColumns ? Self.cardColumnWidth.lowerBound : nil,
-                            maxWidth: usesTwoColumns ? Self.cardColumnWidth.upperBound : .infinity
-                        )
-                        // Beside the cards, the radar runs the full height of
-                        // the page so large screens aren't left half empty.
-                        RadarCard(
-                            place: place,
-                            height: usesTwoColumns
-                                ? max(contentSize.height, Self.minimumRadarColumnHeight)
-                                : nil
-                        )
                     }
+                    .opacity(store.isLoading ? 0.5 : 1)
+                    .animation(.easeInOut(duration: 0.2), value: store.isLoading)
+
+                    // Required by WeatherKit's terms. Below everything, so in
+                    // the two-column layout it's a short scroll past the radar.
+                    WeatherAttributionView()
                 }
-                .opacity(store.isLoading ? 0.5 : 1)
-                .animation(.easeInOut(duration: 0.2), value: store.isLoading)
             }
             .scrollIndicators(.automatic)
             .scrollDismissesKeyboard(.immediately)
@@ -310,9 +316,9 @@ private struct CurrentConditionsCard: View {
     let place: Place
     let current: CurrentWeather
 
-    /// Today's forecast, for the precipitation total. Open-Meteo's *current*
-    /// precipitation is only the last hour, which reads as 0 most of the time
-    /// and says nothing useful about the day ahead.
+    /// Today's forecast, for the precipitation total. A *current*
+    /// precipitation figure covers only the last hour, which reads as 0 most
+    /// of the time and says nothing useful about the day ahead.
     let today: DailyForecast?
 
     let units: UnitPreference

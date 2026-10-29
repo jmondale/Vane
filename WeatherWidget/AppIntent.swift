@@ -3,9 +3,11 @@ import WidgetKit
 
 /// A city a widget can be pointed at.
 ///
-/// The id is Open-Meteo's own geoname id — server-assigned and globally
-/// meaningful — so a widget configured today still resolves months from now,
-/// and on another device. The full `Place` rides along so the timeline provider
+/// The id comes from the place's coordinate (see `Place.id(latitude:longitude:)`),
+/// so it means the same thing on every device and in every later search, and a
+/// widget configured today still resolves months from now. Widgets set up
+/// with earlier builds hold Open-Meteo GeoNames ids, which still resolve
+/// through the shared place directory. The full `Place` rides along so the timeline provider
 /// can request a forecast by coordinate instead of geocoding the name again on
 /// every refresh.
 struct PlaceEntity: AppEntity {

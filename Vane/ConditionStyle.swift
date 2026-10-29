@@ -15,9 +15,11 @@ extension WeatherCondition {
             return [.blue, .cyan]
         case .partlyCloudy:
             return [.teal, .blue]
-        case .overcast, .fog, .unknown:
+        case .windy:
+            return [.teal, .blue]
+        case .overcast, .fog, .haze, .unknown:
             return [.gray, .teal]
-        case .drizzle, .rain, .showers, .freezingDrizzle, .freezingRain:
+        case .drizzle, .rain, .showers, .freezingDrizzle, .freezingRain, .hail:
             return [.blue, .indigo]
         case .snow, .snowGrains, .snowShowers:
             return [.cyan, .mint]
