@@ -191,6 +191,24 @@ nonisolated struct WeatherService: Sendable {
 
     // MARK: - Places
 
+    /// The city a coordinate is in, for showing the weather where someone
+    /// is. Its id comes from the city's own coordinate, not the device's, so
+    /// moving around town keeps it the same place.
+    func place(at location: CLLocation) async throws -> Place {
+        guard let request = MKReverseGeocodingRequest(location: location) else {
+            throw LocationError.unavailable
+        }
+        guard let item = try await request.mapItems.first, let nearby = Self.place(from: item) else {
+            throw LocationError.unavailable
+        }
+        // The reverse lookup is pinned to the device's own coordinate. Looking
+        // the city up by name gives its center instead, and with it the same
+        // id as when it's searched for, so a starred city stays starred.
+        let query = [nearby.name, nearby.admin1, nearby.country].compactMap { $0 }.joined(separator: ", ")
+        let city = try? await Self.search(query).first { $0.name == nearby.name }
+        return city ?? nearby
+    }
+
     /// A search result as a `Place`, or `nil` for one with no usable name.
     private static func place(from item: MKMapItem) -> Place? {
         let coordinate = item.location.coordinate
@@ -328,6 +346,26 @@ nonisolated struct WeatherService: Sendable {
                 continuation?.resume(throwing: error)
             }
             continuation = nil
+        }
+    }
+}
+
+/// Why the weather where someone is couldn't be shown. Shared with the
+/// widget target, which compiles this file but not the location code.
+nonisolated enum LocationError: LocalizedError {
+    case denied
+    case unavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .denied:
+            #if os(macOS)
+            "Location access is off for Vane. Turn it on in System Settings > Privacy & Security > Location Services."
+            #else
+            "Location access is off for Vane. Turn it on in Settings > Apps > Vane > Location."
+            #endif
+        case .unavailable:
+            "Couldn't find your location right now. Try again in a moment."
         }
     }
 }

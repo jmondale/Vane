@@ -45,6 +45,7 @@ nonisolated struct SharedStore: @unchecked Sendable {
         static let units = "unitPreference"
         static let knownPlaces = "knownPlaces"
         static let savedPlaces = "savedPlaces"
+        static let usesCurrentLocation = "usesCurrentLocation"
 
         /// Suffixed with the place id, so each configured widget keeps its own
         /// fallback copy instead of fighting over one slot.
@@ -59,6 +60,16 @@ nonisolated struct SharedStore: @unchecked Sendable {
 
     init(defaults: UserDefaults = .vaneShared) {
         self.defaults = defaults
+    }
+
+    // MARK: - Current location
+
+    /// Whether the app was last showing the weather where the device is,
+    /// so it can find the device again on the next launch rather than
+    /// reopening on wherever that was.
+    var usesCurrentLocation: Bool {
+        get { defaults.bool(forKey: Key.usesCurrentLocation) }
+        nonmutating set { defaults.set(newValue, forKey: Key.usesCurrentLocation) }
     }
 
     // MARK: - Unit preference

@@ -73,6 +73,14 @@ import WidgetKit
     private let service = WeatherService()
     private let shared: SharedStore
 
+    /// Made on first use, so launching never touches Core Location for
+    /// someone who has never tapped My Location.
+    @ObservationIgnored private lazy var location = LocationProvider()
+
+    /// True while the place showing is where the device is, found through
+    /// My Location rather than chosen.
+    private(set) var isShowingCurrentLocation = false
+
     init(shared: SharedStore = SharedStore()) {
         self.shared = shared
         self.storedUnitPreference = shared.unitPreference
@@ -132,13 +140,62 @@ import WidgetKit
         // enough, and fetching again would spend a WeatherKit call on the
         // same numbers. It must have hourly detail, which the widget's
         // saved forecasts leave out.
-        if let fetchedAt, Date.now.timeIntervalSince(fetchedAt) < Self.reuseOnLaunch, report?.hourly.isEmpty == false {
+        // Last shown as My Location: find the device again, as long as that
+        // needs no permission prompt. Launch is no time to ask.
+        if shared.usesCurrentLocation && location.isAuthorized {
+            // Finding the device costs no WeatherKit call; the saved
+            // forecast is reused only if it's still the same city.
+            await selectCurrentLocation(reusingRecentForecast: true)
+            return
+        }
+        if hasRecentForecast(for: saved) {
             query = saved.name
             committedQuery = saved.name
             status = .ready
             return
         }
         await select(saved)
+    }
+
+    /// Whether the forecast showing is for `place` and new enough to show
+    /// again without fetching, with the hourly detail the widget's saved
+    /// forecasts leave out.
+    private func hasRecentForecast(for place: Place) -> Bool {
+        guard reportPlaceID == place.id, let fetchedAt, report?.hourly.isEmpty == false else { return false }
+        return Date.now.timeIntervalSince(fetchedAt) < Self.reuseOnLaunch
+    }
+
+    /// Shows the weather where the device is, asking for location permission
+    /// the first time. A failure leaves whatever was showing in place, under
+    /// a message saying why.
+    func selectCurrentLocation(reusingRecentForecast: Bool = false) async {
+        status = .loading
+        suggestions = []
+        do {
+            let here = try await location.currentLocation()
+            let found = try await service.place(at: here)
+            if reusingRecentForecast, hasRecentForecast(for: found) {
+                place = found
+                isShowingCurrentLocation = true
+                query = found.name
+                committedQuery = found.name
+                status = .ready
+                return
+            }
+            await select(found, isCurrentLocation: true)
+        } catch is CancellationError {
+            status = report == nil ? .idle : .ready
+        } catch let error as LocationError {
+            // With access off, the city showing is no longer "where you
+            // are"; it stays up as an ordinary city, under the message.
+            if case .denied = error {
+                isShowingCurrentLocation = false
+                shared.usesCurrentLocation = false
+            }
+            status = .failed(message: error.localizedDescription)
+        } catch {
+            status = .failed(message: WeatherService.message(for: error))
+        }
     }
 
     /// See `restoreSelectedPlace()`.
@@ -212,8 +269,10 @@ import WidgetKit
     }
 
     /// Loads the forecast for a specific place and remembers it for next launch.
-    func select(_ place: Place) async {
+    func select(_ place: Place, isCurrentLocation: Bool = false) async {
         self.place = place
+        isShowingCurrentLocation = isCurrentLocation
+        shared.usesCurrentLocation = isCurrentLocation
         fallBack(to: place)
         status = .loading
         suggestions = []
@@ -264,7 +323,13 @@ import WidgetKit
         return true
     }
 
+    /// Fetches the forecast again. For My Location, finds the device again
+    /// first, since it may have moved.
     func refresh() async {
+        if isShowingCurrentLocation {
+            await selectCurrentLocation()
+            return
+        }
         guard let place else { return }
         await select(place)
     }

@@ -37,14 +37,19 @@ struct ContentView: View {
         VStack(spacing: 16) {
             searchBar
 
-            if !store.savedPlaces.isEmpty {
-                SavedPlacesBar(
-                    places: store.savedPlaces,
-                    selectedID: store.place?.id,
-                    onSelect: select,
-                    onRemove: { store.toggleSaved($0) }
-                )
-            }
+            SavedPlacesBar(
+                places: store.savedPlaces,
+                // My Location is its own chip, even when the city it found
+                // is also saved.
+                selectedID: store.isShowingCurrentLocation ? nil : store.place?.id,
+                isShowingCurrentLocation: store.isShowingCurrentLocation,
+                onSelectCurrentLocation: {
+                    dismissKeyboard()
+                    Task { await store.selectCurrentLocation() }
+                },
+                onSelect: select,
+                onRemove: { store.toggleSaved($0) }
+            )
 
             // The suggestion list overlays the forecast rather than pushing it
             // down, so the layout doesn't jump while typing.
@@ -239,6 +244,7 @@ struct ContentView: View {
                                     today: report.today,
                                     units: store.unitPreference,
                                     fetchedAt: store.fetchedAt,
+                                    isCurrentLocation: store.isShowingCurrentLocation,
                                     isSaved: store.isSaved(place),
                                     canSave: store.canSaveMorePlaces,
                                     onToggleSave: { store.toggleSaved(place) }
@@ -322,6 +328,8 @@ struct ContentView: View {
 private struct SavedPlacesBar: View {
     let places: [Place]
     let selectedID: Place.ID?
+    let isShowingCurrentLocation: Bool
+    let onSelectCurrentLocation: () -> Void
     let onSelect: (Place) -> Void
     let onRemove: (Place) -> Void
 
@@ -329,6 +337,15 @@ private struct SavedPlacesBar: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
+                    Button(action: onSelectCurrentLocation) {
+                        Label("My Location", systemImage: isShowingCurrentLocation ? "location.fill" : "location")
+                            .font(.subheadline.weight(isShowingCurrentLocation ? .semibold : .regular))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(ChipStyle(isSelected: isShowingCurrentLocation))
+                    .accessibilityAddTraits(isShowingCurrentLocation ? .isSelected : [])
+                    .accessibilityHint("Shows the weather where you are.")
+
                     ForEach(places) { place in
                         chip(for: place)
                             .id(place.id)
@@ -462,6 +479,9 @@ private struct CurrentConditionsCard: View {
     /// When the forecast was fetched, shown so an old one reads as old.
     var fetchedAt: Date?
 
+    /// Marks the place as where the device is, with a location arrow.
+    var isCurrentLocation = false
+
     var isSaved = false
 
     /// False when the saved list is full, which disables starring another.
@@ -489,6 +509,12 @@ private struct CurrentConditionsCard: View {
             headerLayout {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if isCurrentLocation {
+                            Image(systemName: "location.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Your location")
+                        }
                         Text(place.name)
                             .font(.title2.weight(.semibold))
                         Button(action: onToggleSave) {
