@@ -46,6 +46,10 @@ import WidgetKit
     /// noticed and refreshed.
     private(set) var fetchedAt: Date?
 
+    /// The place `report` belongs to. It differs from `place` while a newly
+    /// chosen city loads, and must never be shown under that city's name.
+    private var reportPlaceID: Place.ID?
+
     /// Older than this, a forecast is refreshed when the app comes back to
     /// the front. WeatherKit's current conditions move about this often.
     private static let staleAfter: TimeInterval = 15 * 60
@@ -77,6 +81,10 @@ import WidgetKit
     /// Reloads the place chosen in a previous launch, if there was one.
     func restoreSelectedPlace() async {
         guard place == nil, let saved = shared.selectedPlace else { return }
+        // The last forecast goes up at once, labelled with its age, and is
+        // replaced when the fresh one arrives. Offline, it's all there is.
+        place = saved
+        showCachedReport(for: saved)
         await select(saved)
     }
 
@@ -150,6 +158,7 @@ import WidgetKit
     /// Loads the forecast for a specific place and remembers it for next launch.
     func select(_ place: Place) async {
         self.place = place
+        fallBack(to: place)
         status = .loading
         suggestions = []
         query = place.name
@@ -159,6 +168,7 @@ import WidgetKit
             let fetched = try await service.report(for: place, includeHourly: true)
             report = fetched
             fetchedAt = .now
+            reportPlaceID = place.id
             status = .ready
 
             // The widget reads both of these: the selection, so a newly added
@@ -168,10 +178,34 @@ import WidgetKit
             shared.cache(fetched, for: place)
             WidgetCenter.shared.reloadAllTimelines()
         } catch is CancellationError {
+            fallBack(to: place)
             status = report == nil ? .idle : .ready
         } catch {
+            fallBack(to: place)
             status = .failed(message: WeatherService.message(for: error))
         }
+    }
+
+    /// After a failed load, keeps showing this place's forecast if there is
+    /// one, on screen or saved, rather than another city's under its name.
+    /// With a report left, the error shows as a banner above it.
+    private func fallBack(to place: Place) {
+        guard reportPlaceID != place.id, !showCachedReport(for: place) else { return }
+        report = nil
+        fetchedAt = nil
+        reportPlaceID = nil
+    }
+
+    /// Shows the forecast last saved for `place`, if any. It's the one the
+    /// widget falls back on too, so it may lack hourly detail when the
+    /// widget saved it last.
+    @discardableResult
+    private func showCachedReport(for place: Place) -> Bool {
+        guard let cached = shared.cachedReport(for: place.id) else { return false }
+        report = cached.report
+        fetchedAt = cached.fetchedAt
+        reportPlaceID = place.id
+        return true
     }
 
     func refresh() async {
