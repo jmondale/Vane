@@ -42,6 +42,14 @@ import WidgetKit
     private(set) var place: Place?
     private(set) var report: WeatherReport?
 
+    /// When `report` was fetched, so a forecast left open for hours can be
+    /// noticed and refreshed.
+    private(set) var fetchedAt: Date?
+
+    /// Older than this, a forecast is refreshed when the app comes back to
+    /// the front. WeatherKit's current conditions move about this often.
+    private static let staleAfter: TimeInterval = 15 * 60
+
     /// Live geocoding matches for the current query, shown as a completion list.
     private(set) var suggestions: [Place] = []
     private(set) var status: Status = .idle
@@ -150,6 +158,7 @@ import WidgetKit
         do {
             let fetched = try await service.report(for: place, includeHourly: true)
             report = fetched
+            fetchedAt = .now
             status = .ready
 
             // The widget reads both of these: the selection, so a newly added
@@ -168,5 +177,12 @@ import WidgetKit
     func refresh() async {
         guard let place else { return }
         await select(place)
+    }
+
+    /// Refreshes only if the forecast on screen is old. Called whenever the
+    /// app becomes active, which on iPhone can be hours after it last ran.
+    func refreshIfStale() async {
+        guard !isLoading, let fetchedAt, Date.now.timeIntervalSince(fetchedAt) > Self.staleAfter else { return }
+        await refresh()
     }
 }

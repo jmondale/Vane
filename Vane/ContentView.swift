@@ -9,6 +9,8 @@ struct ContentView: View {
 
     @FocusState private var isSearchFocused: Bool
 
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Size of the area the cards lay out in, for choosing between one and
     /// two columns and for how tall a radar column can be. Measured rather
     /// than read from the screen or size class, so a Mac window, an iPad
@@ -65,6 +67,10 @@ struct ContentView: View {
         .task { await store.restoreSelectedPlace() }
         .task(id: store.query) { await store.updateSuggestions() }
         .onChange(of: store.suggestions) { _, _ in highlightedSuggestion = nil }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await store.refreshIfStale() }
+        }
         .onOpenURL { url in
             guard let id = PlaceLink.placeID(from: url) else { return }
             Task { await store.selectPlace(id: id) }
@@ -192,7 +198,8 @@ struct ContentView: View {
                                     place: place,
                                     current: report.current,
                                     today: report.today,
-                                    units: store.unitPreference
+                                    units: store.unitPreference,
+                                    fetchedAt: store.fetchedAt
                                 )
                                 ForecastCard(report: report, units: store.unitPreference)
                             }
@@ -220,6 +227,8 @@ struct ContentView: View {
             }
             .scrollIndicators(.automatic)
             .scrollDismissesKeyboard(.immediately)
+            // Pull to refresh on iPhone and iPad; the Mac has the button.
+            .refreshable { await store.refresh() }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
         } else if store.isLoading {
             ProgressView("Loading forecast\u{2026}")
@@ -323,15 +332,40 @@ private struct CurrentConditionsCard: View {
 
     let units: UnitPreference
 
+    /// When the forecast was fetched, shown so an old one reads as old.
+    var fetchedAt: Date?
+
+    /// "Updated just now", then "Updated 5 min. ago", "Updated 2 hr. ago".
+    private static func updatedText(_ fetchedAt: Date, now: Date) -> String {
+        guard now.timeIntervalSince(fetchedAt) >= 60 else { return "Updated just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return "Updated \(formatter.localizedString(for: fetchedAt, relativeTo: now))"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(place.name)
-                    .font(.title2.weight(.semibold))
-                if !place.region.isEmpty {
-                    Text(place.region)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(place.name)
+                        .font(.title2.weight(.semibold))
+                    if !place.region.isEmpty {
+                        Text(place.region)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let fetchedAt {
+                    // Ticks over by itself, so "Updated 2 hr. ago" stays true
+                    // while the app sits open. Formatted against the
+                    // timeline's own date: a relative format alone is worked
+                    // out once and then never redrawn.
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text(Self.updatedText(fetchedAt, now: context.date))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
