@@ -44,6 +44,7 @@ nonisolated struct SharedStore: @unchecked Sendable {
         static let selectedPlace = "selectedPlace"
         static let units = "unitPreference"
         static let knownPlaces = "knownPlaces"
+        static let savedPlaces = "savedPlaces"
 
         /// Suffixed with the place id, so each configured widget keeps its own
         /// fallback copy instead of fighting over one slot.
@@ -81,6 +82,25 @@ nonisolated struct SharedStore: @unchecked Sendable {
         nonmutating set {
             encode(newValue, forKey: Key.selectedPlace)
             if let newValue { remember([newValue]) }
+        }
+    }
+
+    // MARK: - Saved places
+
+    /// The cities someone has starred, in the order they're shown. The widget
+    /// offers them first when picking a city.
+    ///
+    /// Before anything has been saved, this starts with the city already
+    /// open, so updating doesn't greet people with an empty list. Once set,
+    /// even to empty, it's left as set.
+    var savedPlaces: [Place] {
+        get {
+            if let saved = decode([Place].self, forKey: Key.savedPlaces) { return saved }
+            return selectedPlace.map { [$0] } ?? []
+        }
+        nonmutating set {
+            encode(newValue, forKey: Key.savedPlaces)
+            remember(newValue)
         }
     }
 

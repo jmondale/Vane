@@ -37,6 +37,15 @@ struct ContentView: View {
         VStack(spacing: 16) {
             searchBar
 
+            if !store.savedPlaces.isEmpty {
+                SavedPlacesBar(
+                    places: store.savedPlaces,
+                    selectedID: store.place?.id,
+                    onSelect: select,
+                    onRemove: { store.toggleSaved($0) }
+                )
+            }
+
             // The suggestion list overlays the forecast rather than pushing it
             // down, so the layout doesn't jump while typing.
             ZStack(alignment: .topLeading) {
@@ -81,6 +90,21 @@ struct ContentView: View {
         .focusedSceneValue(\.refreshForecast, store.place == nil || store.isLoading ? nil : MenuAction(name: "refresh") {
             Task { await store.refresh() }
         })
+        // Stepping needs somewhere to go: two saved cities, or one that
+        // isn't the city showing.
+        .focusedSceneValue(\.nextSavedPlace, canStepSavedPlaces ? MenuAction(name: "next") {
+            dismissKeyboard()
+            Task { await store.selectSavedPlace(offsetBy: 1) }
+        } : nil)
+        .focusedSceneValue(\.previousSavedPlace, canStepSavedPlaces ? MenuAction(name: "previous") {
+            dismissKeyboard()
+            Task { await store.selectSavedPlace(offsetBy: -1) }
+        } : nil)
+    }
+
+    private var canStepSavedPlaces: Bool {
+        let saved = store.savedPlaces
+        return saved.count > 1 || (saved.count == 1 && saved[0].id != store.place?.id)
     }
 
     // MARK: - Search
@@ -214,7 +238,10 @@ struct ContentView: View {
                                     current: report.current,
                                     today: report.today,
                                     units: store.unitPreference,
-                                    fetchedAt: store.fetchedAt
+                                    fetchedAt: store.fetchedAt,
+                                    isSaved: store.isSaved(place),
+                                    canSave: store.canSaveMorePlaces,
+                                    onToggleSave: { store.toggleSaved(place) }
                                 )
                                 // Only when there's something to say about
                                 // the next hour; a dry one adds no card.
@@ -289,6 +316,74 @@ struct ContentView: View {
 
 // MARK: - Completion list
 
+/// The saved cities as a row of chips, the one showing highlighted. Too many
+/// for the width, and the row scrolls sideways. Touch and hold (or
+/// right-click) a chip to remove it.
+private struct SavedPlacesBar: View {
+    let places: [Place]
+    let selectedID: Place.ID?
+    let onSelect: (Place) -> Void
+    let onRemove: (Place) -> Void
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(places) { place in
+                        chip(for: place)
+                            .id(place.id)
+                    }
+                }
+                // Room for the glass buttons' shadows, which the scroll view
+                // would otherwise clip.
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                withAnimation { proxy.scrollTo(id, anchor: .center) }
+            }
+        }
+    }
+
+    @ViewBuilder private func chip(for place: Place) -> some View {
+        let isSelected = place.id == selectedID
+        Button {
+            onSelect(place)
+        } label: {
+            Text(place.name)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .lineLimit(1)
+        }
+        .buttonStyle(ChipStyle(isSelected: isSelected))
+        .contextMenu {
+            Button("Remove \(place.name)", systemImage: "star.slash", role: .destructive) {
+                onRemove(place)
+            }
+        }
+        .accessibilityLabel(place.fullName)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Shows this city's weather. Touch and hold to remove it.")
+    }
+
+    /// Glass, prominent for the city showing. Two styles behind one type, so
+    /// the chip doesn't change identity, and lose its context menu, when
+    /// it's selected.
+    private struct ChipStyle: PrimitiveButtonStyle {
+        let isSelected: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            if isSelected {
+                Button(role: configuration.role, action: configuration.trigger) { configuration.label }
+                    .buttonStyle(.glassProminent)
+            } else {
+                Button(role: configuration.role, action: configuration.trigger) { configuration.label }
+                    .buttonStyle(.glass)
+            }
+        }
+    }
+}
+
 private struct SuggestionList: View {
     let places: [Place]
     let highlighted: Place.ID?
@@ -308,6 +403,9 @@ private struct SuggestionList: View {
             }
         }
         .padding(.vertical, 6)
+        // A solid backing under the glass: clear glass let whatever it
+        // floated over, such as a red alert banner, read through the names.
+        .background(.regularMaterial, in: .rect(cornerRadius: 14))
         .glassEffect(in: .rect(cornerRadius: 14))
         .shadow(radius: 12, y: 4)
     }
@@ -364,6 +462,13 @@ private struct CurrentConditionsCard: View {
     /// When the forecast was fetched, shown so an old one reads as old.
     var fetchedAt: Date?
 
+    var isSaved = false
+
+    /// False when the saved list is full, which disables starring another.
+    var canSave = true
+
+    var onToggleSave: () -> Void = {}
+
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// "Updated just now", then "Updated 5 min. ago", "Updated 2 hr. ago".
@@ -383,8 +488,20 @@ private struct CurrentConditionsCard: View {
                 : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
             headerLayout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(place.name)
-                        .font(.title2.weight(.semibold))
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(place.name)
+                            .font(.title2.weight(.semibold))
+                        Button(action: onToggleSave) {
+                            Image(systemName: isSaved ? "star.fill" : "star")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(isSaved ? Color.yellow : Color.secondary)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!isSaved && !canSave)
+                        .help(isSaved ? "Remove from saved cities" : "Save this city")
+                        .accessibilityLabel(isSaved ? "Remove \(place.name) from saved cities" : "Save \(place.name)")
+                    }
                     if !place.region.isEmpty {
                         Text(place.region)
                             .font(.subheadline)

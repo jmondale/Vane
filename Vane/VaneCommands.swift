@@ -18,6 +18,10 @@ extension FocusedValues {
 
     /// Moves focus to the frontmost window's search field.
     @Entry var focusSearch: MenuAction?
+
+    /// Step through the saved cities, wrapping round.
+    @Entry var nextSavedPlace: MenuAction?
+    @Entry var previousSavedPlace: MenuAction?
 }
 
 /// A Weather menu with keyboard shortcuts for what people do most. On the
@@ -25,6 +29,8 @@ extension FocusedValues {
 struct VaneCommands: Commands {
     @FocusedValue(\.refreshForecast) private var refreshForecast
     @FocusedValue(\.focusSearch) private var focusSearch
+    @FocusedValue(\.nextSavedPlace) private var nextSavedPlace
+    @FocusedValue(\.previousSavedPlace) private var previousSavedPlace
 
     var body: some Commands {
         CommandMenu("Weather") {
@@ -35,6 +41,16 @@ struct VaneCommands: Commands {
             Button("Refresh") { refreshForecast?() }
                 .keyboardShortcut("r")
                 .disabled(refreshForecast == nil)
+
+            Divider()
+
+            Button("Next Saved City") { nextSavedPlace?() }
+                .keyboardShortcut("]")
+                .disabled(nextSavedPlace == nil)
+
+            Button("Previous Saved City") { previousSavedPlace?() }
+                .keyboardShortcut("[")
+                .disabled(previousSavedPlace == nil)
         }
     }
 }

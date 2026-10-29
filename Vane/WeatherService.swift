@@ -223,6 +223,11 @@ nonisolated struct WeatherService: Sendable {
                 if !country.isEmpty, part.hasSuffix(country) {
                     part = String(part.dropLast(country.count)).trimmingCharacters(in: .whitespaces)
                 }
+                // Canadian results can lead with the city again ("Grand
+                // Forks BC"); it's already the place's name.
+                if part.hasPrefix(city + " ") {
+                    part = String(part.dropFirst(city.count + 1))
+                }
                 return part
             }
             .first { !$0.isEmpty && $0 != city && $0 != country }

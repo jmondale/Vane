@@ -54,6 +54,13 @@ import WidgetKit
     /// the front. WeatherKit's current conditions move about this often.
     private static let staleAfter: TimeInterval = 15 * 60
 
+    /// The starred cities, in order. Written through to the shared store.
+    private(set) var savedPlaces: [Place]
+
+    /// Enough for every city someone actually checks, without the row of
+    /// chips becoming a list to scroll through.
+    private static let savedPlaceLimit = 12
+
     /// Live geocoding matches for the current query, shown as a completion list.
     private(set) var suggestions: [Place] = []
     private(set) var status: Status = .idle
@@ -69,6 +76,41 @@ import WidgetKit
     init(shared: SharedStore = SharedStore()) {
         self.shared = shared
         self.storedUnitPreference = shared.unitPreference
+        self.savedPlaces = shared.savedPlaces
+    }
+
+    // MARK: - Saved places
+
+    func isSaved(_ place: Place) -> Bool {
+        savedPlaces.contains { $0.id == place.id }
+    }
+
+    /// Stars or unstars a place. A new one goes at the end of the row.
+    func toggleSaved(_ place: Place) {
+        if isSaved(place) {
+            savedPlaces.removeAll { $0.id == place.id }
+        } else {
+            guard savedPlaces.count < Self.savedPlaceLimit else { return }
+            savedPlaces.append(place)
+        }
+        shared.savedPlaces = savedPlaces
+    }
+
+    var canSaveMorePlaces: Bool {
+        savedPlaces.count < Self.savedPlaceLimit
+    }
+
+    /// The saved place `offset` steps from the one showing, wrapping round.
+    /// From a place that isn't saved, forward starts at the first.
+    func selectSavedPlace(offsetBy offset: Int) async {
+        guard !savedPlaces.isEmpty else { return }
+        let next: Int
+        if let index = savedPlaces.firstIndex(where: { $0.id == place?.id }) {
+            next = (index + offset + savedPlaces.count) % savedPlaces.count
+        } else {
+            next = offset > 0 ? 0 : savedPlaces.count - 1
+        }
+        await select(savedPlaces[next])
     }
 
     var isLoading: Bool { status == .loading }

@@ -75,10 +75,13 @@ struct PlaceEntityQuery: EntityStringQuery {
             .map(PlaceEntity.init(place:))
     }
 
-    /// The list the picker opens on. A cheap read of places already seen, most
-    /// recent first — which puts the city the app is showing at the top.
+    /// The list the picker opens on: the cities saved in the app, then other
+    /// places seen recently, so the ones someone cares about come first.
     func suggestedEntities() async throws -> [PlaceEntity] {
-        shared.knownPlaces.prefix(10).map(PlaceEntity.init(place:))
+        let saved = shared.savedPlaces
+        let savedIDs = Set(saved.map(\.id))
+        let recent = shared.knownPlaces.filter { !savedIDs.contains($0.id) }
+        return (saved + recent).prefix(12).map(PlaceEntity.init(place:))
     }
 }
 
