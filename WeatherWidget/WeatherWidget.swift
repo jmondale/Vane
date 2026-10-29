@@ -41,10 +41,18 @@ struct Provider: AppIntentTimelineProvider {
     /// so a single request serves every family.
     private static let forecastDays = 7
 
-    /// Conditions move slowly and WidgetKit budgets refreshes anyway, so half
-    /// an hour is plenty in steady state. A failure is worth retrying sooner.
-    private static let refreshInterval: TimeInterval = 30 * 60
-    private static let retryInterval: TimeInterval = 10 * 60
+    /// Hourly, which is the grain of the forecast itself. Every refresh is a
+    /// WeatherKit call, and Apple's free allowance is counted across all of
+    /// the app's users, so twice as often would halve how many it covers.
+    /// A failure is worth retrying sooner.
+    private static let refreshInterval: TimeInterval = 60 * 60
+    private static let retryInterval: TimeInterval = 15 * 60
+
+    /// A forecast saved this recently, by the app or another widget showing
+    /// the same city, is used as is instead of fetching again. The app asks
+    /// every widget to reload whenever it fetches, so without this each one
+    /// would repeat the app's call.
+    private static let reuseWindow: TimeInterval = 30 * 60
 
     private let service = WeatherService()
     private let shared = SharedStore()
@@ -89,6 +97,16 @@ struct Provider: AppIntentTimelineProvider {
                 configuration: configuration,
                 snapshot: nil,
                 errorMessage: LoaderError.noCity.localizedDescription
+            )
+        }
+
+        if let cached = shared.cachedReport(for: place.id),
+           Date.now.timeIntervalSince(cached.fetchedAt) < Self.reuseWindow {
+            return WeatherEntry(
+                date: .now,
+                configuration: configuration,
+                snapshot: WidgetSnapshot(place: cached.place, report: cached.report, units: units, staleSince: nil),
+                errorMessage: nil
             )
         }
 

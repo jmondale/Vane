@@ -85,8 +85,22 @@ import WidgetKit
         // replaced when the fresh one arrives. Offline, it's all there is.
         place = saved
         showCachedReport(for: saved)
+
+        // Reopened soon after the last fetch: that forecast is current
+        // enough, and fetching again would spend a WeatherKit call on the
+        // same numbers. It must have hourly detail, which the widget's
+        // saved forecasts leave out.
+        if let fetchedAt, Date.now.timeIntervalSince(fetchedAt) < Self.reuseOnLaunch, report?.hourly.isEmpty == false {
+            query = saved.name
+            committedQuery = saved.name
+            status = .ready
+            return
+        }
         await select(saved)
     }
+
+    /// See `restoreSelectedPlace()`.
+    private static let reuseOnLaunch: TimeInterval = 10 * 60
 
     /// Selects the place a widget's deep link points at. The id resolves
     /// against the shared directory, which holds every place the app or a
