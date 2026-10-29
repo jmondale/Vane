@@ -20,7 +20,10 @@ struct RadarCard: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             map
-            controls
+            if isCovered {
+                controls
+            }
+            credit
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -37,7 +40,7 @@ struct RadarCard: View {
             Label("Radar", systemImage: "dot.radiowaves.left.and.right")
                 .font(.headline)
             Spacer()
-            if let frame = store.currentFrame {
+            if isCovered, let frame = store.currentFrame {
                 // Relative rather than a clock time: the viewer's time zone
                 // and the place's can differ, but "20 min ago" means the
                 // same thing in both.
@@ -53,7 +56,9 @@ struct RadarCard: View {
     private var map: some View {
         RadarMapView(
             center: CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude),
-            frames: store.frames,
+            // No frames outside the provider's coverage, so the map doesn't
+            // ask the service for tiles that can only be empty.
+            frames: isCovered ? store.frames : [],
             currentFrame: store.currentFrame,
             provider: store.provider,
             recenterRequest: recenterRequest
@@ -84,7 +89,23 @@ struct RadarCard: View {
         .accessibilityLabel("Center radar on \(place.name)")
     }
 
+    private var isCovered: Bool {
+        store.provider.covers(latitude: place.latitude, longitude: place.longitude)
+    }
+
     @ViewBuilder private var statusOverlay: some View {
+        if !isCovered {
+            Label("Radar covers the US and Canada", systemImage: "info.circle.fill")
+                .font(.callout)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .glassEffect(in: .rect(cornerRadius: 12))
+        } else {
+            statusMessage
+        }
+    }
+
+    @ViewBuilder private var statusMessage: some View {
         switch store.status {
         case .loading:
             ProgressView()
@@ -119,12 +140,16 @@ struct RadarCard: View {
                 .disabled(store.frames.count < 2)
                 .accessibilityLabel("Radar time")
                 .accessibilityValue(timeDescription)
-
-            // Required by RainViewer's free terms: visible credit, linked.
-            Link(store.provider.attribution.text, destination: store.provider.attribution.url)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
+    }
+
+    /// Required by the provider's licence: visible credit, linked. On a line
+    /// of its own, since a full agency name would squeeze the slider.
+    private var credit: some View {
+        Link(store.provider.attribution.text, destination: store.provider.attribution.url)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     // MARK: - Helpers

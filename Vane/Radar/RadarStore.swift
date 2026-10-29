@@ -17,8 +17,8 @@ import Observation
     /// latest picture is the one that registers.
     private static let loopPause: Duration = .milliseconds(1_500)
 
-    /// RainViewer adds a frame every ten minutes; checking twice as often
-    /// keeps the newest one at most five minutes late.
+    /// Radar services add a scan every five to ten minutes; checking this
+    /// often keeps the newest one from falling far behind.
     private static let refreshInterval: Duration = .seconds(300)
 
     let provider: any RadarProvider
@@ -31,7 +31,7 @@ import Observation
 
     var isPlaying = false
 
-    init(provider: any RadarProvider = RainViewerProvider()) {
+    init(provider: any RadarProvider = EnvironmentCanadaProvider()) {
         self.provider = provider
     }
 

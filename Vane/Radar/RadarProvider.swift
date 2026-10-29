@@ -31,10 +31,19 @@ nonisolated protocol RadarProvider: Sendable {
 
     var attribution: RadarAttribution { get }
 
+    /// The session tile and frame requests go through, carrying whatever
+    /// headers the provider's terms ask for.
+    var session: URLSession { get }
+
+    /// Whether the provider has radar for a place at all. Outside its
+    /// coverage the map would only ever be empty.
+    func covers(latitude: Double, longitude: Double) -> Bool
+
     /// The frames available right now, oldest first.
     func frames() async throws -> [RadarFrame]
 
-    /// The image URL for one tile of `frame`, in standard web-map (XYZ)
-    /// tile coordinates. `pixelSize` is 256, or 512 for Retina displays.
-    func tileURL(for frame: RadarFrame, x: Int, y: Int, zoom: Int, pixelSize: Int) -> URL?
+    /// The image URLs for one tile of `frame`, in standard web-map (XYZ)
+    /// tile coordinates, as layers to draw bottom to top. `pixelSize` is
+    /// 256, or 512 for Retina displays.
+    func tileURLs(for frame: RadarFrame, x: Int, y: Int, zoom: Int, pixelSize: Int) -> [URL]
 }

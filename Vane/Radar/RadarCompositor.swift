@@ -78,8 +78,7 @@ nonisolated enum RadarCompositor {
         for frame: RadarFrame,
         in viewport: RadarViewport,
         pixelsPerMapPoint: Double,
-        provider: any RadarProvider,
-        session: URLSession = .shared
+        provider: any RadarProvider
     ) async -> RadarImage? {
         let rect = viewport.mapRect
 
@@ -90,26 +89,30 @@ nonisolated enum RadarCompositor {
         let height = Int((rect.height * density).rounded())
         guard width > 0, height > 0 else { return nil }
 
-        let tiles = await withTaskGroup(of: (x: Int, y: Int, image: CGImage?).self) { group in
+        let tiles = await withTaskGroup(of: (x: Int, y: Int, layer: Int, image: CGImage?).self) { group in
             for x in viewport.minX...viewport.maxX {
                 for y in viewport.minY...viewport.maxY {
-                    group.addTask {
-                        let url = provider.tileURL(
-                            for: frame,
-                            x: x,
-                            y: y,
-                            zoom: viewport.zoom,
-                            pixelSize: tilePixels
-                        )
-                        return (x, y, await tile(at: url, session: session))
+                    let urls = provider.tileURLs(
+                        for: frame,
+                        x: x,
+                        y: y,
+                        zoom: viewport.zoom,
+                        pixelSize: tilePixels
+                    )
+                    for (layer, url) in urls.enumerated() {
+                        group.addTask {
+                            (x, y, layer, await tile(at: url, session: provider.session))
+                        }
                     }
                 }
             }
-            var tiles: [(x: Int, y: Int, image: CGImage?)] = []
+            var tiles: [(x: Int, y: Int, layer: Int, image: CGImage?)] = []
             for await tile in group {
                 tiles.append(tile)
             }
-            return tiles
+            // Layers arrive in whatever order they finish; they're drawn in
+            // the order the provider listed them.
+            return tiles.sorted { $0.layer < $1.layer }
         }
 
         guard !Task.isCancelled,
@@ -153,9 +156,8 @@ nonisolated enum RadarCompositor {
 
     /// One tile, or `nil` if it's missing or fails to load — a gap in the
     /// radar is better than no radar at all.
-    private static func tile(at url: URL?, session: URLSession) async -> CGImage? {
-        guard let url,
-              let (data, response) = try? await session.data(from: url),
+    private static func tile(at url: URL, session: URLSession) async -> CGImage? {
+        guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
               let source = CGImageSourceCreateWithData(data as CFData, nil)
