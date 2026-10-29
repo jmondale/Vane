@@ -92,6 +92,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search for a city", text: $store.query)
                     .textFieldStyle(.plain)
+                    // Place names aren't dictionary words: left on,
+                    // autocorrect turns "Payson" into "Paulson".
+                    .autocorrectionDisabled()
                     .focused($isSearchFocused)
                     .onSubmit(submit)
                     .onKeyPress(.downArrow) { moveHighlight(by: 1) }
