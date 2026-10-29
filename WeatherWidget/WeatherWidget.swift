@@ -122,7 +122,7 @@ struct Provider: AppIntentTimelineProvider {
                 date: .now,
                 configuration: configuration,
                 snapshot: nil,
-                errorMessage: error.localizedDescription
+                errorMessage: WeatherService.message(for: error)
             )
         }
     }

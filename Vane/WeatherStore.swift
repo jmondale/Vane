@@ -135,7 +135,7 @@ import WidgetKit
         } catch is CancellationError {
             status = report == nil ? .idle : .ready
         } catch {
-            status = .failed(message: error.localizedDescription)
+            status = .failed(message: WeatherService.message(for: error))
         }
     }
 
@@ -161,7 +161,7 @@ import WidgetKit
         } catch is CancellationError {
             status = report == nil ? .idle : .ready
         } catch {
-            status = .failed(message: error.localizedDescription)
+            status = .failed(message: WeatherService.message(for: error))
         }
     }
 

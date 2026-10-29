@@ -113,6 +113,28 @@ nonisolated struct WeatherService: Sendable {
         try await WeatherKit.WeatherService.shared.attribution
     }
 
+    /// A sentence to show someone when a lookup fails. The errors themselves
+    /// are written for developers ("WeatherDaemon…Errors error 2"), so only
+    /// their kind is used: no connection, a slow one, or the service itself.
+    static func message(for error: any Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost,
+                 NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff:
+                return "You're offline. Check your connection and try again."
+            case NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost:
+                return "The weather service didn't respond. Try again in a moment."
+            default:
+                break
+            }
+        }
+        if error is MKError {
+            return "Couldn't search for places right now. Try again in a moment."
+        }
+        return "Couldn't load the forecast from Apple Weather. Try again in a moment."
+    }
+
     // MARK: - Places
 
     /// A search result as a `Place`, or `nil` for one with no usable name.

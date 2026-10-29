@@ -103,7 +103,9 @@ import Observation
         } catch {
             // A failed refresh leaves the frames already on screen alone.
             if frames.isEmpty {
-                status = .failed(message: error.localizedDescription)
+                let isOffline = (error as NSError).domain == NSURLErrorDomain
+                    && (error as NSError).code == NSURLErrorNotConnectedToInternet
+                status = .failed(message: isOffline ? "Radar needs a connection." : "Radar is unavailable right now.")
             }
         }
     }
