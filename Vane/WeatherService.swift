@@ -76,12 +76,16 @@ nonisolated struct WeatherService: Sendable {
         let current: WeatherKit.CurrentWeather
         let days: WeatherKit.Forecast<DayWeather>
         var hours: WeatherKit.Forecast<HourWeather>?
+        var minutes: WeatherKit.Forecast<MinuteWeather>?
         if includeHourly {
-            (current, days, hours) = try await service.weather(
+            // One request for all of it: WeatherKit counts calls, not data
+            // sets, so the next hour costs nothing extra.
+            (current, days, hours, minutes) = try await service.weather(
                 for: location,
                 including: .current,
                 .daily(startDate: today, endDate: end),
-                .hourly(startDate: today, endDate: end)
+                .hourly(startDate: today, endDate: end),
+                .minute
             )
         } else {
             (current, days) = try await service.weather(
@@ -108,7 +112,31 @@ nonisolated struct WeatherService: Sendable {
                 dewPointCelsius: current.dewPoint.converted(to: .celsius).value
             ),
             daily: Self.dailyForecasts(from: days, calendar: calendar),
-            hourly: hours.map { Self.hourlyForecasts(from: $0, timeZone: timeZone) } ?? []
+            hourly: hours.map { Self.hourlyForecasts(from: $0, timeZone: timeZone) } ?? [],
+            nextHour: minutes.flatMap(Self.nextHour(from:))
+        )
+    }
+
+    private static func nextHour(from forecast: WeatherKit.Forecast<MinuteWeather>) -> NextHourForecast? {
+        // WeatherKit returns a little over an hour; the card shows an hour,
+        // plus the minute in progress.
+        let minutes = Array(forecast.prefix(61))
+        guard let first = minutes.first else { return nil }
+        let wettest = minutes.max { $0.precipitationIntensity.value < $1.precipitationIntensity.value }
+        let kind: String = switch wettest?.precipitation {
+        case .snow: "Snow"
+        case .sleet: "Sleet"
+        case .hail: "Hail"
+        case .mixed: "Precipitation"
+        default: "Rain"
+        }
+        return NextHourForecast(
+            start: first.date,
+            kind: kind,
+            chances: minutes.map(\.precipitationChance),
+            // Foundation has no millimetres-per-hour unit; a kilometre an
+            // hour is a million of them.
+            intensities: minutes.map { $0.precipitationIntensity.converted(to: .kilometersPerHour).value * 1_000_000 }
         )
     }
 

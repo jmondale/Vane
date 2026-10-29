@@ -308,6 +308,42 @@ nonisolated struct HourlyForecast: Codable, Identifiable, Sendable {
     }
 }
 
+/// Precipitation over the next hour, minute by minute from `start`.
+nonisolated struct NextHourForecast: Codable, Sendable {
+    let start: Date
+
+    /// What's falling: "Rain", "Snow", "Sleet", "Hail" or "Precipitation"
+    /// for a mix, taken from the wettest minute.
+    let kind: String
+
+    /// One entry per minute: the chance of anything falling, 0–1, and how
+    /// hard, in millimetres an hour.
+    let chances: [Double]
+    let intensities: [Double]
+
+    /// A minute counts as wet at even odds or better: the threshold Apple's
+    /// own next-hour summaries appear to use.
+    static let wetChance = 0.5
+
+    /// The headline as of `now`, or `nil` when the hour is dry, or the
+    /// forecast is too old to say anything about it.
+    func summary(at now: Date) -> String? {
+        let offset = max(0, Int(now.timeIntervalSince(start) / 60))
+        guard offset < chances.count else { return nil }
+        let wet = chances[offset...].map { $0 >= Self.wetChance }
+        guard wet.contains(true) else { return nil }
+
+        if wet[0] {
+            guard let stop = wet.firstIndex(of: false) else {
+                return "\(kind) for the next hour"
+            }
+            return stop <= 1 ? "\(kind) stopping now" : "\(kind) stopping in \(stop) min"
+        }
+        let begin = wet.firstIndex(of: true) ?? 0
+        return begin <= 1 ? "\(kind) starting now" : "\(kind) starting in \(begin) min"
+    }
+}
+
 /// Everything one fetch produces for a place.
 nonisolated struct WeatherReport: Codable, Sendable {
     let current: CurrentWeather
@@ -317,19 +353,31 @@ nonisolated struct WeatherReport: Codable, Sendable {
     /// it; the widget's reports leave it empty.
     let hourly: [HourlyForecast]
 
-    init(current: CurrentWeather, daily: [DailyForecast], hourly: [HourlyForecast] = []) {
+    /// The next hour minute by minute, where WeatherKit offers it (some
+    /// countries only). Like `hourly`, only the app asks for it.
+    let nextHour: NextHourForecast?
+
+    init(
+        current: CurrentWeather,
+        daily: [DailyForecast],
+        hourly: [HourlyForecast] = [],
+        nextHour: NextHourForecast? = nil
+    ) {
         self.current = current
         self.daily = daily
         self.hourly = hourly
+        self.nextHour = nextHour
     }
 
-    /// Reports cached before `hourly` existed have no such key. Decoding it as
-    /// empty keeps those caches usable instead of dropping them.
+    /// Reports cached before `hourly` or `nextHour` existed have no such
+    /// keys. Decoding them as empty keeps those caches usable instead of
+    /// dropping them.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         current = try container.decode(CurrentWeather.self, forKey: .current)
         daily = try container.decode([DailyForecast].self, forKey: .daily)
         hourly = try container.decodeIfPresent([HourlyForecast].self, forKey: .hourly) ?? []
+        nextHour = try container.decodeIfPresent(NextHourForecast.self, forKey: .nextHour)
     }
 
     /// Today's entry, falling back to the first day available. A report cached

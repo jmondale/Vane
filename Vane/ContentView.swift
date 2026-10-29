@@ -207,6 +207,11 @@ struct ContentView: View {
                                     units: store.unitPreference,
                                     fetchedAt: store.fetchedAt
                                 )
+                                // Only when there's something to say about
+                                // the next hour; a dry one adds no card.
+                                if let nextHour = report.nextHour, nextHour.summary(at: .now) != nil {
+                                    NextHourCard(forecast: nextHour)
+                                }
                                 ForecastCard(report: report, units: store.unitPreference)
                                 // Beside the radar, the details fill the left
                                 // column; in one column they wait below it, so
@@ -520,6 +525,60 @@ private struct DetailTile: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Rain (or snow) over the next hour: a headline that counts down while the
+/// app is open, over a bar for every minute.
+private struct NextHourCard: View {
+    let forecast: NextHourForecast
+
+    /// Bars are scaled against at least this, so drizzle looks like drizzle
+    /// rather than filling the chart. It's where "moderate" rain begins.
+    private static let fullScaleIntensity = 2.5
+
+    @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 44
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let offset = max(0, Int(context.date.timeIntervalSince(forecast.start) / 60))
+            let chances = Array(forecast.chances.dropFirst(offset).prefix(60))
+            let intensities = Array(forecast.intensities.dropFirst(offset).prefix(60))
+            let scale = max(intensities.max() ?? 0, Self.fullScaleIntensity)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Label(forecast.summary(at: context.date) ?? "No \(forecast.kind.lowercased()) this hour", systemImage: "umbrella.fill")
+                    .font(.subheadline.weight(.semibold))
+
+                HStack(alignment: .bottom, spacing: 1) {
+                    ForEach(intensities.indices, id: \.self) { minute in
+                        Capsule()
+                            .fill(Color.blue.opacity(chances[minute] >= NextHourForecast.wetChance ? 0.85 : 0.25))
+                            // A sliver even when dry, so the hour reads as a
+                            // continuous line rather than gaps.
+                            .frame(height: max(2, chartHeight * min(1, intensities[minute] / scale)))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: chartHeight, alignment: .bottom)
+                .accessibilityHidden(true)
+
+                HStack {
+                    Text("Now")
+                    Spacer()
+                    Text("30 min")
+                    Spacer()
+                    Text("60 min")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(in: .rect(cornerRadius: 20))
         .accessibilityElement(children: .combine)
     }
 }
