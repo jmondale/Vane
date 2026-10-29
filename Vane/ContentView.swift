@@ -335,6 +335,8 @@ private struct CurrentConditionsCard: View {
     /// When the forecast was fetched, shown so an old one reads as old.
     var fetchedAt: Date?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     /// "Updated just now", then "Updated 5 min. ago", "Updated 2 hr. ago".
     private static func updatedText(_ fetchedAt: Date, now: Date) -> String {
         guard now.timeIntervalSince(fetchedAt) >= 60 else { return "Updated just now" }
@@ -345,7 +347,12 @@ private struct CurrentConditionsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
+            // Beside the name normally; under it at the accessibility sizes,
+            // where side by side squeezes both onto several lines.
+            let headerLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+            headerLayout {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(place.name)
                         .font(.title2.weight(.semibold))
@@ -355,7 +362,9 @@ private struct CurrentConditionsCard: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Spacer(minLength: 8)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                }
                 if let fetchedAt {
                     // Ticks over by itself, so "Updated 2 hr. ago" stays true
                     // while the app sits open. Formatted against the
@@ -398,7 +407,12 @@ private struct CurrentConditionsCard: View {
                 .frame(maxWidth: .infinity)
             }
 
-            HStack(spacing: 12) {
+            // Stacked at the accessibility text sizes, where three across
+            // leaves room for only a few letters per line.
+            let tileLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 12))
+                : AnyLayout(HStackLayout(spacing: 12))
+            tileLayout {
                 DetailTile(
                     symbol: "thermometer.medium",
                     label: "Feels like",
@@ -516,13 +530,17 @@ private struct WindVane: View {
                         .transition(.opacity)
                 }
                 speedReadout
+                    // The dial is a fixed-size graphic; past this the speed
+                    // runs into the arrow. The caption below still grows.
+                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
             }
             .frame(width: Self.dialSize, height: Self.dialSize)
 
             caption
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(height: 14)
+                .multilineTextAlignment(.center)
+                .frame(minHeight: 14)
         }
         // Center the row on the dial alone, not the dial plus caption, so the
         // dial lines up with the temperature beside it.
@@ -703,9 +721,17 @@ private struct ForecastCard: View {
     /// The day whose hours are showing, if any.
     @State private var expandedDay: DailyForecast.ID?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
+        // Seven columns don't fit at the accessibility text sizes; there the
+        // days become rows, each laid out across the card.
+        let dayLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 4))
+
         VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 4) {
+            dayLayout {
                 ForEach(report.daily) { day in
                     DayColumn(
                         day: day,
@@ -763,30 +789,20 @@ private struct DayColumn: View {
 
     @State private var isHovered = false
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Tall enough for any condition symbol at the current text size.
+    @ScaledMetric(relativeTo: .title3) private var symbolHeight: CGFloat = 24
+
     var body: some View {
         Button(action: onToggle) {
-            VStack(spacing: 8) {
-                Text(day.isToday ? "Today" : day.weekday)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(day.isToday || isExpanded ? .primary : .secondary)
-                Image(systemName: day.condition.symbolName(isDaytime: true))
-                    .font(.title3)
-                    .symbolRenderingMode(.multicolor)
-                    // These symbols differ in intrinsic height — cloud.fill
-                    // is much shorter than cloud.sun.fill — so without a
-                    // fixed height every row below sits at a different
-                    // level from one column to the next.
-                    .frame(height: 24)
-                    .accessibilityHidden(true)
-                Text(day.highCelsius.temperatureText(in: units))
-                    .font(.callout.weight(.medium))
-                Text(day.lowCelsius.temperatureText(in: units))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                PrecipitationChance(text: day.precipitationChanceText)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    row
+                } else {
+                    column
+                }
             }
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -804,8 +820,75 @@ private struct DayColumn: View {
         .accessibilityAddTraits(isExpanded ? .isSelected : [])
     }
 
+    private var name: String {
+        day.isToday ? "Today" : day.weekday
+    }
+
+    private var nameText: some View {
+        Text(name)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(day.isToday || isExpanded ? .primary : .secondary)
+            .lineLimit(1)
+    }
+
+    private var symbol: some View {
+        Image(systemName: day.condition.symbolName(isDaytime: true))
+            .font(.title3)
+            .symbolRenderingMode(.multicolor)
+            // These symbols differ in intrinsic height — cloud.fill is much
+            // shorter than cloud.sun.fill — so without a fixed height every
+            // row below sits at a different level from one column to the next.
+            .frame(height: symbolHeight)
+            .accessibilityHidden(true)
+    }
+
+    private var highText: some View {
+        Text(day.highCelsius.temperatureText(in: units))
+            .font(.callout.weight(.medium))
+            .lineLimit(1)
+    }
+
+    private var lowText: some View {
+        Text(day.lowCelsius.temperatureText(in: units))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+
+    /// The usual layout: one narrow column of seven across the card.
+    private var column: some View {
+        VStack(spacing: 8) {
+            nameText
+            symbol
+            highText
+            lowText
+            PrecipitationChance(text: day.precipitationChanceText)
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The accessibility-size layout: the day and its chance of rain on the
+    /// left, the sky in the middle, the high over the low on the right.
+    private var row: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                nameText
+                PrecipitationChance(text: day.precipitationChanceText)
+            }
+            Spacer(minLength: 8)
+            symbol
+            VStack(alignment: .trailing, spacing: 2) {
+                highText
+                lowText
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+    }
+
     private var accessibilityLabel: String {
-        let name = day.isToday ? "Today" : day.weekday
         let high = day.highCelsius.temperatureText(in: units)
         let low = day.lowCelsius.temperatureText(in: units)
         var label = "\(name), \(day.condition.description), high \(high), low \(low)"
@@ -826,6 +909,8 @@ private struct HourlyStrip: View {
     let hours: [HourlyForecast]
     let units: UnitPreference
 
+    @ScaledMetric(relativeTo: .title3) private var symbolHeight: CGFloat = 24
+
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 4) {
@@ -835,16 +920,20 @@ private struct HourlyStrip: View {
                         Text(isNow ? "Now" : hour.hourLabel)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(isNow ? .primary : .secondary)
+                            .lineLimit(1)
                         Image(systemName: hour.condition.symbolName(isDaytime: hour.isDaytime))
                             .font(.title3)
                             .symbolRenderingMode(.multicolor)
-                            .frame(height: 24)
+                            .frame(height: symbolHeight)
                             .accessibilityHidden(true)
                         Text(hour.temperatureCelsius.temperatureText(in: units))
                             .font(.callout.weight(.medium))
+                            .lineLimit(1)
                         PrecipitationChance(text: hour.precipitationChanceText)
                     }
-                    .frame(width: 48)
+                    // At least as wide as a day column; wider when larger
+                    // text needs it, since the strip scrolls anyway.
+                    .frame(minWidth: 48)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(accessibilityLabel(for: hour, isNow: isNow))
                 }
@@ -875,18 +964,24 @@ private struct HourlyStrip: View {
 private struct PrecipitationChance: View {
     let text: String?
 
+    /// Both scale with the text, so larger sizes aren't cut off at the
+    /// default size's height.
+    @ScaledMetric(relativeTo: .caption2) private var dropSize: CGFloat = 8
+    @ScaledMetric(relativeTo: .caption2) private var rowHeight: CGFloat = 12
+
     var body: some View {
         HStack(spacing: 2) {
             if let text {
                 Image(systemName: "drop.fill")
-                    .font(.system(size: 8))
+                    .font(.system(size: dropSize))
                 Text(text)
                     .font(.caption2)
                     .monospacedDigit()
+                    .lineLimit(1)
             }
         }
         .foregroundStyle(.secondary)
-        .frame(height: 12)
+        .frame(height: rowHeight)
     }
 }
 

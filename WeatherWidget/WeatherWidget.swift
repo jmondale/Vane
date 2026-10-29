@@ -361,15 +361,25 @@ private struct DayColumn: View {
     let day: DailyForecast
     let units: UnitPreference
 
+    @ScaledMetric(relativeTo: .caption2) private var nameHeight: CGFloat = 14
+
     var body: some View {
         VStack(spacing: 3) {
             Text(day.isToday ? "Today" : day.weekday)
                 .font(.caption2.weight(day.isToday ? .semibold : .regular))
                 .foregroundStyle(day.isToday ? .primary : .secondary)
                 .lineLimit(1)
+                // "Today" is wider than the temperatures under it, and the
+                // medium layout's columns are sized to those. Shrinking it
+                // shortens its line too, so the line's height is fixed.
+                .minimumScaleFactor(0.7)
+                .frame(height: nameHeight)
             Image(systemName: day.condition.symbolName(isDaytime: true))
                 .font(.caption)
                 .symbolRenderingMode(.multicolor)
+                // Condition symbols differ in height; a fixed one keeps the
+                // temperatures level from column to column, as in the app.
+                .frame(height: 16)
             Text(day.highCelsius.temperatureText(in: units))
                 .font(.caption2.weight(.medium))
             Text(day.lowCelsius.temperatureText(in: units))
