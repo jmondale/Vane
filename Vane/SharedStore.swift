@@ -74,14 +74,21 @@ nonisolated struct SharedStore: @unchecked Sendable {
 
     // MARK: - Unit preference
 
+    /// Until someone picks, the units the device's region uses: °F in the
+    /// United States (and the few other places that use US measurements),
+    /// °C everywhere else.
     var unitPreference: UnitPreference {
         get {
             defaults.string(forKey: Key.units)
-                .flatMap(UnitPreference.init(rawValue:)) ?? .metric
+                .flatMap(UnitPreference.init(rawValue:)) ?? Self.regionalUnitPreference
         }
         nonmutating set {
             defaults.set(newValue.rawValue, forKey: Key.units)
         }
+    }
+
+    private static var regionalUnitPreference: UnitPreference {
+        Locale.current.measurementSystem == .us ? .imperial : .metric
     }
 
     // MARK: - Selected place
