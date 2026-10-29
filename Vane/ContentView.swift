@@ -75,6 +75,12 @@ struct ContentView: View {
             guard let id = PlaceLink.placeID(from: url) else { return }
             Task { await store.selectPlace(id: id) }
         }
+        // For the Weather menu's shortcuts. Refresh is withheld when the
+        // refresh button would be disabled.
+        .focusedSceneValue(\.focusSearch, MenuAction(name: "search") { isSearchFocused = true })
+        .focusedSceneValue(\.refreshForecast, store.place == nil || store.isLoading ? nil : MenuAction(name: "refresh") {
+            Task { await store.refresh() }
+        })
     }
 
     // MARK: - Search

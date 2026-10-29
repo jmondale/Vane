@@ -5,6 +5,7 @@ import SwiftUI
         WindowGroup("Vane") {
             ContentView()
         }
+        .commands { VaneCommands() }
         #if os(macOS)
         // Tall enough to show the radar below the forecast on most screens;
         // macOS shrinks it to fit smaller ones, and the content scrolls.
