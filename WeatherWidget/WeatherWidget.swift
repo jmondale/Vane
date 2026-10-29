@@ -166,18 +166,42 @@ struct WeatherWidgetEntryView: View {
                 SmallWeatherView(snapshot: snapshot)
             case .systemLarge:
                 LargeWeatherView(snapshot: snapshot)
+            #if os(iOS)
+            case .accessoryInline:
+                InlineWeatherView(snapshot: snapshot)
+            case .accessoryCircular:
+                CircularWeatherView(snapshot: snapshot)
+            case .accessoryRectangular:
+                RectangularWeatherView(snapshot: snapshot)
+            #endif
             default:
                 MediumWeatherView(snapshot: snapshot)
             }
+        } else if isAccessory {
+            // The Lock Screen has no room for a sentence.
+            Image(systemName: "cloud.slash")
+                .accessibilityLabel(entry.errorMessage ?? "Weather is unavailable.")
         } else {
             UnavailableView(message: entry.errorMessage ?? "Weather is unavailable.")
         }
     }
 
+    private var isAccessory: Bool {
+        #if os(iOS)
+        [.accessoryInline, .accessoryCircular, .accessoryRectangular].contains(family)
+        #else
+        false
+        #endif
+    }
+
     /// The condition's own tints, over the system's widget fill. Uses the same
-    /// mapping as the app window, so a given sky reads the same in both.
+    /// mapping as the app window, so a given sky reads the same in both. The
+    /// Lock Screen tints widgets itself, so accessory families get the
+    /// system's own backdrop instead.
     @ViewBuilder private var background: some View {
-        if let current = entry.snapshot?.report.current {
+        if isAccessory {
+            AccessoryWidgetBackground()
+        } else if let current = entry.snapshot?.report.current {
             current.condition
                 .gradient(isDaytime: current.isDaytime, opacity: 0.45)
                 .background(.fill.tertiary)
@@ -507,6 +531,96 @@ private struct UnavailableView: View {
     }
 }
 
+// MARK: - Lock Screen
+
+#if os(iOS)
+/// One line above the clock: the sky, the temperature and the city.
+private struct InlineWeatherView: View {
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        let current = snapshot.report.current
+        Label {
+            Text("\(current.temperatureCelsius.compactTemperatureText(in: snapshot.units)) \(snapshot.place.name)")
+        } icon: {
+            Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+        }
+    }
+}
+
+/// Today's range as a gauge, with where the temperature sits in it now.
+private struct CircularWeatherView: View {
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        let current = snapshot.report.current
+        if let today = snapshot.report.daily.first {
+            let low = min(today.lowCelsius, current.temperatureCelsius)
+            let high = max(today.highCelsius, current.temperatureCelsius, low + 1)
+            Gauge(value: current.temperatureCelsius, in: low...high) {
+                Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+            } currentValueLabel: {
+                Text(current.temperatureCelsius.compactTemperatureText(in: snapshot.units))
+            } minimumValueLabel: {
+                Text(today.lowCelsius.compactTemperatureText(in: snapshot.units))
+            } maximumValueLabel: {
+                Text(today.highCelsius.compactTemperatureText(in: snapshot.units))
+            }
+            .gaugeStyle(.accessoryCircular)
+            .accessibilityLabel("\(snapshot.place.name), \(current.temperatureCelsius.temperatureText(in: snapshot.units)), \(current.condition.description)")
+        } else {
+            VStack(spacing: 0) {
+                Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+                Text(current.temperatureCelsius.compactTemperatureText(in: snapshot.units))
+            }
+        }
+    }
+}
+
+/// The city and temperature, the sky and today's range, and the Apple
+/// Weather mark WeatherKit's terms ask for wherever there's room for it.
+private struct RectangularWeatherView: View {
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        let current = snapshot.report.current
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: current.condition.symbolName(isDaytime: current.isDaytime))
+                Text(snapshot.place.name)
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Text(current.temperatureCelsius.compactTemperatureText(in: snapshot.units))
+            }
+            .font(.headline)
+            .widgetAccentable()
+
+            if let today = snapshot.report.daily.first {
+                Text("\(current.condition.description) · H:\(today.highCelsius.compactTemperatureText(in: snapshot.units)) L:\(today.lowCelsius.compactTemperatureText(in: snapshot.units))")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            Text("\u{F8FF}Weather")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Apple Weather")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+#endif
+
+private extension Double {
+    /// Whole degrees with the unit left off ("50°"): the Lock Screen's
+    /// shorthand, where "°F" would crowd out the number.
+    func compactTemperatureText(in preference: UnitPreference) -> String {
+        Measurement(value: self, unit: UnitTemperature.celsius)
+            .converted(to: preference.temperatureUnit)
+            .formatted(.measurement(width: .narrow, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0))))
+    }
+}
+
 private extension DailyForecast {
     func accessibilityLabel(units: UnitPreference) -> String {
         let name = isToday ? "Today" : weekday
@@ -525,7 +639,17 @@ struct WeatherWidget: Widget {
         }
         .configurationDisplayName("Weather")
         .description("Current conditions and a short forecast for a city you choose.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .supportedFamilies(Self.families)
+    }
+
+    /// The Home Screen and desktop sizes everywhere; the Lock Screen's on
+    /// iPhone and iPad, which are the only places that have one.
+    private static var families: [WidgetFamily] {
+        #if os(iOS)
+        [.systemSmall, .systemMedium, .systemLarge, .accessoryInline, .accessoryCircular, .accessoryRectangular]
+        #else
+        [.systemSmall, .systemMedium, .systemLarge]
+        #endif
     }
 }
 
