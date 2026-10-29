@@ -100,7 +100,12 @@ nonisolated struct WeatherService: Sendable {
                 condition: WeatherCondition(current.condition),
                 isDaytime: current.isDaylight,
                 windDirectionDegrees: current.wind.direction.converted(to: .degrees).value,
-                windGustKPH: current.wind.gust?.converted(to: .kilometersPerHour).value
+                windGustKPH: current.wind.gust?.converted(to: .kilometersPerHour).value,
+                uvIndex: current.uvIndex.value,
+                pressureHectopascals: current.pressure.converted(to: .hectopascals).value,
+                pressureTrend: CurrentWeather.PressureTrend(current.pressureTrend),
+                visibilityKilometers: current.visibility.converted(to: .kilometers).value,
+                dewPointCelsius: current.dewPoint.converted(to: .celsius).value
             ),
             daily: Self.dailyForecasts(from: days, calendar: calendar),
             hourly: hours.map { Self.hourlyForecasts(from: $0, timeZone: timeZone) } ?? []
@@ -194,6 +199,7 @@ nonisolated struct WeatherService: Sendable {
         calendar: Calendar
     ) -> [DailyForecast] {
         let weekdayStyle = Date.FormatStyle(timeZone: calendar.timeZone).weekday(.abbreviated)
+        let timeStyle = Date.FormatStyle(date: .omitted, time: .shortened, timeZone: calendar.timeZone)
 
         return days.map { day in
             // WeatherKit marks each day by its start in the place's own zone.
@@ -207,7 +213,9 @@ nonisolated struct WeatherService: Sendable {
                 lowCelsius: day.lowTemperature.converted(to: .celsius).value,
                 precipitationProbability: Int((day.precipitationChance * 100).rounded()),
                 // All types together, snow as its liquid equivalent.
-                precipitationMillimeters: day.precipitationAmountByType.precipitation.converted(to: .millimeters).value
+                precipitationMillimeters: day.precipitationAmountByType.precipitation.converted(to: .millimeters).value,
+                sunriseLabel: day.sun.sunrise?.formatted(timeStyle),
+                sunsetLabel: day.sun.sunset?.formatted(timeStyle)
             )
         }
     }
@@ -266,6 +274,17 @@ nonisolated struct WeatherService: Sendable {
                 continuation?.resume(throwing: error)
             }
             continuation = nil
+        }
+    }
+}
+
+extension CurrentWeather.PressureTrend {
+    nonisolated init?(_ trend: WeatherKit.PressureTrend) {
+        switch trend {
+        case .rising: self = .rising
+        case .falling: self = .falling
+        case .steady: self = .steady
+        @unknown default: return nil
         }
     }
 }

@@ -208,6 +208,12 @@ struct ContentView: View {
                                     fetchedAt: store.fetchedAt
                                 )
                                 ForecastCard(report: report, units: store.unitPreference)
+                                // Beside the radar, the details fill the left
+                                // column; in one column they wait below it, so
+                                // the radar stays near the top of the page.
+                                if usesTwoColumns {
+                                    DetailsCard(report: report, units: store.unitPreference)
+                                }
                             }
                             .frame(
                                 minWidth: usesTwoColumns ? Self.cardColumnWidth.lowerBound : nil,
@@ -221,6 +227,9 @@ struct ContentView: View {
                                     ? max(contentSize.height, Self.minimumRadarColumnHeight)
                                     : nil
                             )
+                            if !usesTwoColumns {
+                                DetailsCard(report: report, units: store.unitPreference)
+                            }
                         }
                     }
                     .opacity(store.isLoading ? 0.5 : 1)
@@ -493,6 +502,9 @@ private struct DetailTile: View {
     let label: String
     let value: String
 
+    /// A word or two under the value, such as a UV index's category.
+    var detail: String? = nil
+
     var body: some View {
         VStack(spacing: 4) {
             Label(label, systemImage: symbol)
@@ -501,9 +513,72 @@ private struct DetailTile: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.body.weight(.medium))
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The readings that don't need a place of their own: UV, the sun, pressure,
+/// visibility and dew point. A reading the report lacks, such as one from a
+/// forecast cached by an older version, is left out rather than shown blank.
+private struct DetailsCard: View {
+    let report: WeatherReport
+    let units: UnitPreference
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let tiles = self.tiles
+        if !tiles.isEmpty {
+            // Three across everywhere, so six readings make two even rows
+            // whatever the card's width; two at the accessibility sizes.
+            let count = dynamicTypeSize.isAccessibilitySize ? 2 : 3
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
+            LazyVGrid(columns: columns, spacing: 18) {
+                ForEach(tiles, id: \.label) { tile in
+                    tile
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity)
+            .glassEffect(in: .rect(cornerRadius: 20))
+        }
+    }
+
+    private var tiles: [DetailTile] {
+        let current = report.current
+        var tiles: [DetailTile] = []
+
+        if let uv = current.uvIndex {
+            tiles.append(DetailTile(symbol: "sun.max.fill", label: "UV index", value: "\(uv)", detail: current.uvCategory))
+        }
+        if let sunrise = report.today?.sunriseLabel {
+            tiles.append(DetailTile(symbol: "sunrise.fill", label: "Sunrise", value: sunrise))
+        }
+        if let sunset = report.today?.sunsetLabel {
+            tiles.append(DetailTile(symbol: "sunset.fill", label: "Sunset", value: sunset))
+        }
+        if let pressure = current.pressureHectopascals {
+            tiles.append(DetailTile(
+                symbol: "gauge.with.dots.needle.50percent",
+                label: "Pressure",
+                value: pressure.pressureText(in: units),
+                detail: current.pressureTrend?.rawValue.capitalized
+            ))
+        }
+        if let visibility = current.visibilityKilometers {
+            tiles.append(DetailTile(symbol: "eye.fill", label: "Visibility", value: visibility.distanceText(in: units)))
+        }
+        if let dewPoint = current.dewPointCelsius {
+            tiles.append(DetailTile(symbol: "drop.degreesign.fill", label: "Dew point", value: dewPoint.temperatureText(in: units)))
+        }
+        return tiles
     }
 }
 

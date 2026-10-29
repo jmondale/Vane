@@ -74,6 +74,20 @@ nonisolated enum UnitPreference: String, CaseIterable, Identifiable, Sendable {
         case .imperial: .inches
         }
     }
+
+    var distanceUnit: UnitLength {
+        switch self {
+        case .metric: .kilometers
+        case .imperial: .miles
+        }
+    }
+
+    var pressureUnit: UnitPressure {
+        switch self {
+        case .metric: .hectopascals
+        case .imperial: .inchesOfMercury
+        }
+    }
 }
 
 /// A weather condition, mapped from WeatherKit's conditions. The case names
@@ -171,6 +185,31 @@ nonisolated struct CurrentWeather: Codable, Sendable {
     /// The strongest gust expected around now.
     var windGustKPH: Double? = nil
 
+    // The details card's readings. Optional, like the wind fields above, so
+    // reports cached before they existed still decode.
+
+    var uvIndex: Int? = nil
+    var pressureHectopascals: Double? = nil
+    var pressureTrend: PressureTrend? = nil
+    var visibilityKilometers: Double? = nil
+    var dewPointCelsius: Double? = nil
+
+    nonisolated enum PressureTrend: String, Codable, Sendable {
+        case rising, falling, steady
+    }
+
+    /// The WHO exposure category for `uvIndex`.
+    var uvCategory: String? {
+        guard let uvIndex else { return nil }
+        switch uvIndex {
+        case ..<3: return "Low"
+        case 3..<6: return "Moderate"
+        case 6..<8: return "High"
+        case 8..<11: return "Very high"
+        default: return "Extreme"
+        }
+    }
+
     /// Below this the wind has no meaningful direction, and an arrow pointing
     /// anywhere would be noise.
     static let calmThresholdKPH = 1.0
@@ -232,6 +271,12 @@ nonisolated struct DailyForecast: Codable, Identifiable, Sendable {
     /// Total expected precipitation, as liquid water equivalent — snow is
     /// included here rather than reported separately.
     let precipitationMillimeters: Double
+
+    /// Sunrise and sunset as clock times in the location's own zone, like
+    /// `weekday`. `nil` when the sun doesn't rise or set that day (polar
+    /// day and night), and in reports cached before they existed.
+    var sunriseLabel: String? = nil
+    var sunsetLabel: String? = nil
 
     var id: Date { date }
 
@@ -332,6 +377,33 @@ extension Double {
                     width: .abbreviated,
                     usage: .asProvided,
                     numberFormatStyle: .number.precision(.fractionLength(0...2))
+                )
+            )
+    }
+
+    /// Formats a kilometre value in the preferred unit, whole numbers past
+    /// ten, where a decimal is noise.
+    func distanceText(in preference: UnitPreference) -> String {
+        let converted = Measurement(value: self, unit: UnitLength.kilometers).converted(to: preference.distanceUnit)
+        return converted.formatted(
+            .measurement(
+                width: .abbreviated,
+                usage: .asProvided,
+                numberFormatStyle: .number.precision(.fractionLength(converted.value < 10 ? 0...1 : 0...0))
+            )
+        )
+    }
+
+    /// Formats a hectopascal value in the preferred unit: whole hPa, or
+    /// inches of mercury to two places, the way each is usually quoted.
+    func pressureText(in preference: UnitPreference) -> String {
+        Measurement(value: self, unit: UnitPressure.hectopascals)
+            .converted(to: preference.pressureUnit)
+            .formatted(
+                .measurement(
+                    width: .abbreviated,
+                    usage: .asProvided,
+                    numberFormatStyle: .number.precision(.fractionLength(preference == .metric ? 0 : 2))
                 )
             )
     }
