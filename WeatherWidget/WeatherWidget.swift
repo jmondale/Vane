@@ -222,7 +222,7 @@ private struct SmallWeatherView: View {
                 HighLowLabel(day: today, units: snapshot.units)
             }
 
-            StaleFooter(staleSince: snapshot.staleSince, compact: true)
+            WidgetFooter(staleSince: snapshot.staleSince, compact: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -276,7 +276,7 @@ private struct MediumWeatherView: View {
 
             Spacer(minLength: 0)
 
-            StaleFooter(staleSince: snapshot.staleSince, compact: false)
+            WidgetFooter(staleSince: snapshot.staleSince, compact: false)
         }
     }
 }
@@ -350,7 +350,7 @@ private struct LargeWeatherView: View {
 
             Spacer(minLength: 0)
 
-            StaleFooter(staleSince: snapshot.staleSince, compact: false)
+            WidgetFooter(staleSince: snapshot.staleSince, compact: false)
         }
     }
 }
@@ -450,22 +450,33 @@ private struct DetailChip: View {
 
 /// Marks a report that's being shown because the last refresh failed, so an
 /// old forecast never passes for a current one.
-private struct StaleFooter: View {
+/// The bottom row of every layout: how old the forecast is, when it's a
+/// saved one, and the Apple Weather mark WeatherKit's terms require wherever
+/// its data is shown. A widget can't hold the app's linked logo image, so
+/// the mark is the trademark as text; the legal link is in the app.
+private struct WidgetFooter: View {
     let staleSince: Date?
     let compact: Bool
 
     var body: some View {
-        if let staleSince {
-            let time = staleSince.formatted(date: .omitted, time: .shortened)
-            Label(
-                compact ? time : "As of \(time)",
-                systemImage: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
-            )
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .accessibilityLabel("Last updated \(time)")
+        HStack(spacing: 4) {
+            if let staleSince {
+                let time = staleSince.formatted(date: .omitted, time: .shortened)
+                Label(
+                    compact ? time : "As of \(time)",
+                    systemImage: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+                )
+                .lineLimit(1)
+                .accessibilityLabel("Last updated \(time)")
+            }
+            Spacer(minLength: 0)
+            Text("\u{F8FF}Weather")
+                .lineLimit(1)
+                .fixedSize()
+                .accessibilityLabel("Apple Weather")
         }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
 }
 
