@@ -200,6 +200,12 @@ struct ContentView: View {
                 : AnyLayout(VStackLayout(spacing: 16))
             ScrollView {
                 VStack(spacing: 16) {
+                    // Across the full width and above everything else:
+                    // an alert is the one thing that shouldn't need a scroll.
+                    ForEach(report.alerts) { alert in
+                        AlertBanner(alert: alert)
+                    }
+
                     GlassEffectContainer(spacing: 16) {
                         layout {
                             VStack(spacing: 16) {
@@ -529,6 +535,62 @@ private struct DetailTile: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// One severe weather alert, laid out to WeatherKit's rules: the summary as
+/// issued, the agency named in full, and the whole banner a link to Apple's
+/// details page, the only place the full text is shown.
+private struct AlertBanner: View {
+    let alert: WeatherAlert
+
+    var body: some View {
+        Link(destination: alert.detailsURL) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(alert.summary)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(issuedBy)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.15), in: .rect(cornerRadius: 20))
+            .glassEffect(in: .rect(cornerRadius: 20))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the full alert")
+    }
+
+    private var issuedBy: String {
+        if let region = alert.region, !region.isEmpty {
+            return "Issued by \(alert.source) for \(region)"
+        }
+        return "Issued by \(alert.source)"
+    }
+
+    private var tint: Color {
+        switch alert.severity {
+        case .extreme, .severe: .red
+        case .moderate: .orange
+        case .minor, .unknown: .yellow
+        }
     }
 }
 

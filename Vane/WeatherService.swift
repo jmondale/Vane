@@ -77,15 +77,17 @@ nonisolated struct WeatherService: Sendable {
         let days: WeatherKit.Forecast<DayWeather>
         var hours: WeatherKit.Forecast<HourWeather>?
         var minutes: WeatherKit.Forecast<MinuteWeather>?
+        var alerts: [WeatherKit.WeatherAlert]?
         if includeHourly {
             // One request for all of it: WeatherKit counts calls, not data
-            // sets, so the next hour costs nothing extra.
-            (current, days, hours, minutes) = try await service.weather(
+            // sets, so the next hour and alerts cost nothing extra.
+            (current, days, hours, minutes, alerts) = try await service.weather(
                 for: location,
                 including: .current,
                 .daily(startDate: today, endDate: end),
                 .hourly(startDate: today, endDate: end),
-                .minute
+                .minute,
+                .alerts
             )
         } else {
             (current, days) = try await service.weather(
@@ -113,7 +115,26 @@ nonisolated struct WeatherService: Sendable {
             ),
             daily: Self.dailyForecasts(from: days, calendar: calendar),
             hourly: hours.map { Self.hourlyForecasts(from: $0, timeZone: timeZone) } ?? [],
-            nextHour: minutes.flatMap(Self.nextHour(from:))
+            nextHour: minutes.flatMap(Self.nextHour(from:)),
+            alerts: (alerts ?? [])
+                .map { alert in
+                    WeatherAlert(
+                        summary: alert.summary,
+                        source: alert.source,
+                        region: alert.region,
+                        severity: WeatherAlert.Severity(alert.severity),
+                        detailsURL: alert.detailsURL
+                    )
+                }
+                .sorted { $0.severity > $1.severity }
+                // Agencies often issue one watch as several alerts, one per
+                // forecast zone; on a single place's page they'd read as
+                // duplicates. The most severe of each stays, with its link.
+                .reduce(into: [WeatherAlert]()) { kept, alert in
+                    if !kept.contains(where: { $0.summary == alert.summary && $0.source == alert.source && $0.region == alert.region }) {
+                        kept.append(alert)
+                    }
+                }
         )
     }
 
@@ -302,6 +323,18 @@ nonisolated struct WeatherService: Sendable {
                 continuation?.resume(throwing: error)
             }
             continuation = nil
+        }
+    }
+}
+
+extension WeatherAlert.Severity {
+    nonisolated init(_ severity: WeatherKit.WeatherSeverity) {
+        switch severity {
+        case .minor: self = .minor
+        case .moderate: self = .moderate
+        case .severe: self = .severe
+        case .extreme: self = .extreme
+        default: self = .unknown
         }
     }
 }

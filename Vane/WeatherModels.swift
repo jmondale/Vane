@@ -308,6 +308,43 @@ nonisolated struct HourlyForecast: Codable, Identifiable, Sendable {
     }
 }
 
+/// A severe weather alert in effect for the place. WeatherKit's terms set
+/// how it's shown: the summary exactly as issued, the issuing agency named
+/// in full, and a link to Apple's page with the details.
+nonisolated struct WeatherAlert: Codable, Sendable, Identifiable {
+    /// As issued, e.g. "Flood Watch". Never reworded or shortened.
+    let summary: String
+
+    /// The agency that issued it, in full, e.g. "National Weather Service".
+    let source: String
+
+    /// The area it covers, when the agency names one.
+    let region: String?
+
+    let severity: Severity
+
+    /// Apple's page for the alert, which every alert shown must link to.
+    let detailsURL: URL
+
+    var id: URL { detailsURL }
+
+    nonisolated enum Severity: String, Codable, Sendable, Comparable {
+        case minor, moderate, severe, extreme, unknown
+
+        private var rank: Int {
+            switch self {
+            case .unknown: 0
+            case .minor: 1
+            case .moderate: 2
+            case .severe: 3
+            case .extreme: 4
+            }
+        }
+
+        static func < (lhs: Self, rhs: Self) -> Bool { lhs.rank < rhs.rank }
+    }
+}
+
 /// Precipitation over the next hour, minute by minute from `start`.
 nonisolated struct NextHourForecast: Codable, Sendable {
     let start: Date
@@ -357,16 +394,21 @@ nonisolated struct WeatherReport: Codable, Sendable {
     /// countries only). Like `hourly`, only the app asks for it.
     let nextHour: NextHourForecast?
 
+    /// Alerts in effect, most severe first. Only the app asks for them.
+    let alerts: [WeatherAlert]
+
     init(
         current: CurrentWeather,
         daily: [DailyForecast],
         hourly: [HourlyForecast] = [],
-        nextHour: NextHourForecast? = nil
+        nextHour: NextHourForecast? = nil,
+        alerts: [WeatherAlert] = []
     ) {
         self.current = current
         self.daily = daily
         self.hourly = hourly
         self.nextHour = nextHour
+        self.alerts = alerts
     }
 
     /// Reports cached before `hourly` or `nextHour` existed have no such
@@ -378,6 +420,7 @@ nonisolated struct WeatherReport: Codable, Sendable {
         daily = try container.decode([DailyForecast].self, forKey: .daily)
         hourly = try container.decodeIfPresent([HourlyForecast].self, forKey: .hourly) ?? []
         nextHour = try container.decodeIfPresent(NextHourForecast.self, forKey: .nextHour)
+        alerts = try container.decodeIfPresent([WeatherAlert].self, forKey: .alerts) ?? []
     }
 
     /// Today's entry, falling back to the first day available. A report cached
