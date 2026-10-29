@@ -22,6 +22,7 @@ struct RadarCard: View {
             map
             if isCovered {
                 controls
+                legend
             }
             credit
         }
@@ -143,6 +144,32 @@ struct RadarCard: View {
         }
     }
 
+    /// What the colors mean, as a bar of the provider's scale. Labelled in
+    /// words: the scale's steps are uneven, so numbers under it would
+    /// suggest a precision the bar doesn't have.
+    private var legend: some View {
+        VStack(spacing: 3) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: store.provider.legend.colors.map(Color.init(rgb:)),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ))
+                .frame(height: 6)
+            HStack {
+                Text("Light")
+                Spacer()
+                Text("Heavy")
+                Spacer()
+                Text("Extreme")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Radar colors: light blue for light rain or snow, through green and yellow to red and purple for extreme")
+    }
+
     /// Required by the provider's licence: visible credit, linked. On a line
     /// of its own, since a full agency name would squeeze the slider.
     private var credit: some View {
@@ -187,4 +214,15 @@ struct RadarCard: View {
     )
     .padding(20)
     .frame(width: 480)
+}
+
+private extension Color {
+    /// A color from a 0xRRGGBB value.
+    nonisolated init(rgb: UInt32) {
+        self.init(
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255
+        )
+    }
 }

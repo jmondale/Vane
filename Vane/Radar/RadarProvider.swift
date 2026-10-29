@@ -18,6 +18,12 @@ nonisolated struct RadarAttribution: Sendable {
     let url: URL
 }
 
+/// What the radar's colors mean: its color scale from lightest to heaviest
+/// precipitation, as 0xRRGGBB values evenly spaced along it.
+nonisolated struct RadarLegend: Sendable {
+    let colors: [UInt32]
+}
+
 /// A source of radar imagery.
 ///
 /// Everything specific to one radar service lives behind this protocol, so
@@ -30,6 +36,8 @@ nonisolated protocol RadarProvider: Sendable {
     var maximumZoom: Int { get }
 
     var attribution: RadarAttribution { get }
+
+    var legend: RadarLegend { get }
 
     /// The session tile and frame requests go through, carrying whatever
     /// headers the provider's terms ask for.

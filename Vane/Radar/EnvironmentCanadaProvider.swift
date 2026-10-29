@@ -69,6 +69,16 @@ nonisolated struct EnvironmentCanadaProvider: RadarProvider {
         RadarAttribution(text: "Radar data: Environment and Climate Change Canada", url: Self.licence)
     }
 
+    /// The layer's default style, sampled from its legend (GetLegendGraphic),
+    /// which runs from 0.1 to 200 mm/h on an uneven scale.
+    var legend: RadarLegend {
+        RadarLegend(colors: [
+            0x98CBFE, 0x069BFE, 0x00F179, 0x00D615, 0x00A700, 0x007900,
+            0x8AB800, 0xFEE700, 0xFEB800, 0xFE8A00, 0xFE5000, 0xFE0013,
+            0xFA049B, 0x9833CB, 0x6A049D, 0x3B0059,
+        ])
+    }
+
     private static let licence: URL = {
         guard let url = URL(string: "https://eccc-msc.github.io/open-data/licence/readme_en/") else {
             preconditionFailure("The ECCC licence URL literal is malformed.")
